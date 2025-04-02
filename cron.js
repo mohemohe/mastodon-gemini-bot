@@ -26,14 +26,4 @@ cron.schedule(CRON_SCHEDULE, async () => {
   }
 });
 
-// 即時実行（最初の1回）
-(async () => {
-  console.log(`${new Date().toISOString()} - 初回実行を開始します`);
-  
-  try {
-    await runMain();
-    console.log(`${new Date().toISOString()} - 初回実行が完了しました`);
-  } catch (error) {
-    console.error(`${new Date().toISOString()} - 初回実行中にエラーが発生しました:`, error);
-  }
-})(); 
+console.log(`${new Date().toISOString()} - 定期実行を待機します`);
