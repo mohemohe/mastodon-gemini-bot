@@ -42,7 +42,7 @@ Mastodonアカウントの投稿履歴を取得し、Google Gemini AIを使っ�
    GEMINI_MODEL=gemini-pro                 # 使用するGeminiモデル（デフォルト: gemini-pro）
 
    # 定期実行設定
-   CRON_SCHEDULE=0/20 * * * *                 # cron形式で実行間隔を指定（例: 毎時0分から20分ごとに実行）
+   CRON_SCHEDULE=0,20,40 * * * *                 # cron形式で実行間隔を指定（例: 毎時0分から20分ごとに実行）
    ```
 
 ### アクセストークンの取得方法
@@ -91,7 +91,7 @@ Mastodonアカウントの投稿履歴を取得し、Google Gemini AIを使っ�
 - `CRON_SCHEDULE=0 0 * * *` - 毎日0時（日次）
 - `CRON_SCHEDULE=0 9,18 * * *` - 毎日9時と18時
 - `CRON_SCHEDULE=*/30 * * * *` - 30分ごと
-- `CRON_SCHEDULE=0/20 * * * *` - 毎時0分から20分ごと（デフォルト）
+- `CRON_SCHEDULE=0,20,40 * * * *` - 毎時0分から20分ごと（デフォルト）
 
 cron式の書式は `分 時 日 月 曜日` の順です。
 
