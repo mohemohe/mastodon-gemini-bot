@@ -349,7 +349,13 @@ ${statusesText}
     // 生成の実行
     const result = await model.generateContent(prompt);
     const response = result.response;
-    const generatedText = response.text();
+    let generatedText = response.text().trim();
+    
+    // 末尾の連続した改行を削除
+    generatedText = generatedText.replace(/[\r\n]+$/, '');
+    
+    // #botタグを追加
+    generatedText = generatedText + ' #bot';
     
     return generatedText;
   } catch (error) {
