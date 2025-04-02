@@ -1,0 +1,28 @@
+# 環境変数
+.env
+
+# 依存関係
+/node_modules/
+
+# キャッシュファイル
+/cache/
+
+# ログ
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS関連
+.DS_Store
+Thumbs.db
+
+# エディタ関連
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo 

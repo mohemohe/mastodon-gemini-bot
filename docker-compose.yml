@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  mastodon-gemini-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mastodon-gemini-bot
+    restart: unless-stopped
+    env_file:
+      - .env  # 環境変数を.envファイルから読み込み
+    volumes:
+      - ./cache:/app/cache  # キャッシュデータを永続化

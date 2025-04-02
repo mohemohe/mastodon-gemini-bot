@@ -1,0 +1,24 @@
+# Git関連
+.git
+.gitignore
+
+# Node.js関連
+node_modules
+npm-debug.log
+
+# キャッシュ（ホストマウント用）
+/cache
+
+# 環境変数
+.env
+
+# Dockerファイル
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# エディタ設定
+.vscode
+.idea
+*.swp
+*.swo 
