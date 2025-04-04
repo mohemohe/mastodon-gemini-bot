@@ -337,18 +337,22 @@ async function fetchAccountStatuses(accountId, sourceClient) {
 
 // Geminiモデルを使って文章を生成する関数
 async function generateTextWithGemini(statuses) {
-  try {
-    console.log('Geminiを使用して文章を生成します...');
-    
-    // ステータスの内容を結合して、シンプルなコーパスを作成
-    const statusesText = statuses.join('\n\n');
-    
-    // Geminiモデルの設定
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    
-    // プロンプトの作成
-    const prompt = `
+  const MAX_RETRIES = 10;
+  let retryCount = 0;
+  
+  while (retryCount < MAX_RETRIES) {
+    try {
+      console.log('Geminiを使用して文章を生成します...');
+      
+      // ステータスの内容を結合して、シンプルなコーパスを作成
+      const statusesText = statuses.join('\n\n');
+      
+      // Geminiモデルの設定
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+      
+      // プロンプトの作成
+      const prompt = `
 以下の文章は、あるMastodonユーザーの過去の投稿の集まりです。
 これらの投稿の文体と内容を学習して、そのユーザーが書きそうな新しい投稿を1つ生成してください。
 生成する文章は、1文のみで、短すぎず長すぎず、元の投稿と同じような雰囲気を持ち、自然に見えるようにしてください。
@@ -359,22 +363,33 @@ async function generateTextWithGemini(statuses) {
 ${statusesText}
 `;
 
-    // 生成の実行
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    let generatedText = response.text().trim();
-    
-    // 末尾の連続した改行を削除
-    generatedText = generatedText.replace(/[\r\n]+$/, '');
-    
-    // #botタグを追加
-    generatedText = generatedText + ' #bot';
-    
-    return generatedText;
-  } catch (error) {
-    console.error('文章生成中にエラーが発生しました:', error);
-    return null;
+      // 生成の実行
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      let generatedText = response.text().trim();
+      
+      // 末尾の連続した改行を削除
+      generatedText = generatedText.replace(/[\r\n]+$/, '');
+      
+      // #botタグを追加
+      generatedText = generatedText + ' #bot';
+      
+      return generatedText;
+    } catch (error) {
+      if (error.message.includes('RECITATION') && retryCount < MAX_RETRIES - 1) {
+        retryCount++;
+        console.log(`RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
+        // 少し待機してからリトライ
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+      console.error('文章生成中にエラーが発生しました:', error);
+      return null;
+    }
   }
+  
+  console.error(`最大リトライ回数(${MAX_RETRIES}回)に達しました`);
+  return null;
 }
 
 // メイン処理を行う関数
