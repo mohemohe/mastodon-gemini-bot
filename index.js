@@ -61,8 +61,12 @@ async function resolveAccountId(username, sourceClient) {
     
     console.log(`ユーザー名 '${cleanUsername}' からアカウントIDを取得します...`);
     
+    // ユーザー名の形式をチェック
+    const isRemoteUser = cleanUsername.includes('@');
+    const searchQuery = isRemoteUser ? cleanUsername : `@${cleanUsername}`;
+    
     // 検索エンドポイントを使用して検索
-    const res = await sourceClient.search(cleanUsername, { type: 'accounts', limit: 10 });
+    const res = await sourceClient.search(searchQuery, { type: 'accounts', limit: 10 });
     const accounts = res.data.accounts;
     
     if (accounts.length === 0) {
@@ -75,6 +79,15 @@ async function resolveAccountId(username, sourceClient) {
       const username = account.username.toLowerCase();
       const cleanUsernameL = cleanUsername.toLowerCase();
       
+      // リモートユーザーの場合は完全一致のみ
+      if (isRemoteUser) {
+        return acct === cleanUsernameL;
+      }
+      
+      // ローカルユーザーの場合は、リモートユーザーを除外してから検索
+      if (acct.includes('@')) {
+        return false; // リモートユーザーはスキップ
+      }
       return acct === cleanUsernameL || username === cleanUsernameL;
     });
     
