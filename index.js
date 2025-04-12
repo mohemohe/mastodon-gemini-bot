@@ -18,6 +18,9 @@ const BOT_POST_ENABLED = (process.env.BOT_POST_ENABLED || 'false').toLowerCase()
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro';
 
+// 履歴の保持件数
+const HISTORY_LIMIT = parseInt(process.env.HISTORY_LIMIT || '5', 10);
+
 // アカウントIDキャッシュファイルのパス
 const CACHE_DIR = path.join(__dirname, 'cache');
 
@@ -335,10 +338,60 @@ async function fetchAccountStatuses(accountId, sourceClient) {
   return allStatuses;
 }
 
+// 履歴ファイルのパスを取得する関数
+function getHistoryFilePath(accountId) {
+  return path.join(CACHE_DIR, `history_${accountId}.json`);
+}
+
+// 履歴ファイルの確認と作成
+function ensureHistoryFile(accountId) {
+  if (!fs.existsSync(CACHE_DIR)) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  }
+  const historyFile = getHistoryFilePath(accountId);
+  if (!fs.existsSync(historyFile)) {
+    fs.writeFileSync(historyFile, JSON.stringify({ history: [] }, null, 2));
+  }
+}
+
+// 履歴を読み込む関数
+function loadHistory(accountId) {
+  try {
+    const historyFile = getHistoryFilePath(accountId);
+    const data = fs.readFileSync(historyFile, 'utf8');
+    return JSON.parse(data).history;
+  } catch (error) {
+    console.error('履歴の読み込み中にエラーが発生しました:', error);
+    return [];
+  }
+}
+
+// 履歴を保存する関数
+function saveHistory(text, accountId) {
+  try {
+    const history = loadHistory(accountId);
+    history.unshift({
+      text: text,
+      timestamp: new Date().toISOString()
+    });
+    
+    // 設定された件数まで保持
+    const trimmedHistory = history.slice(0, HISTORY_LIMIT);
+    const historyFile = getHistoryFilePath(accountId);
+    fs.writeFileSync(historyFile, JSON.stringify({ history: trimmedHistory }, null, 2));
+  } catch (error) {
+    console.error('履歴の保存中にエラーが発生しました:', error);
+  }
+}
+
 // Geminiモデルを使って文章を生成する関数
-async function generateTextWithGemini(statuses) {
+async function generateTextWithGemini(statuses, accountId) {
   const MAX_RETRIES = 10;
   let retryCount = 0;
+  
+  // 履歴の初期化
+  ensureHistoryFile(accountId);
+  const history = loadHistory(accountId);
   
   while (retryCount < MAX_RETRIES) {
     try {
@@ -346,6 +399,9 @@ async function generateTextWithGemini(statuses) {
       
       // ステータスの内容を結合して、シンプルなコーパスを作成
       const statusesText = statuses.join('\n\n');
+      
+      // 履歴の内容を結合
+      const historyText = history.map(h => h.text).join('\n\n');
       
       // Geminiモデルの設定
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -355,12 +411,18 @@ async function generateTextWithGemini(statuses) {
       const prompt = `
 以下の文章は、あるMastodonユーザーの過去の投稿の集まりです。
 これらの投稿の文体と内容を学習して、そのユーザーが書きそうな新しい投稿を1つ生成してください。
-生成する文章は、1文のみで、短すぎず長すぎず、元の投稿と同じような雰囲気を持ち、自然に見えるようにしてください。
-装飾やメタ情報は含めず、純粋に投稿文のみを出力してください。
-また、文末の句点「。」は省いてください。
+
+以下の点に注意してください：
+- 生成する文章は、1文のみで、短すぎず長すぎず、元の投稿と同じような雰囲気を持ち、自然に見えるようにしてください
+- 装飾やメタ情報は含めず、純粋に投稿文のみを出力してください
+- 文末の句点「。」は省いてください
+- 以下の「最近生成された投稿」と似た内容は生成しないでください
 
 参考投稿:
 ${statusesText}
+
+最近生成された投稿:
+${historyText}
 `;
 
       // 生成の実行
@@ -370,6 +432,9 @@ ${statusesText}
       
       // 末尾の連続した改行を削除
       generatedText = generatedText.replace(/[\r\n]+$/, '');
+      
+      // 履歴に保存
+      saveHistory(generatedText, accountId);
       
       // #botタグを追加
       generatedText = generatedText + ' #bot';
@@ -416,7 +481,7 @@ async function runMain() {
     }
     
     // 文章の生成
-    const generatedText = await generateTextWithGemini(statuses);
+    const generatedText = await generateTextWithGemini(statuses, accountId);
     
     if (generatedText) {
       console.log('\n===== 生成された文章 =====\n');
