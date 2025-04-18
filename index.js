@@ -265,6 +265,8 @@ async function fetchAccountStatuses(accountId, sourceClient) {
     }
     return [];
   }
+
+  const maxStatuses = parseInt(process.env.MAX_STATUSES || '3000', 10);
   
   // キャッシュがない場合、または最新IDが更新されている場合は新しい投稿を取得
   if (allStatuses.length === 0 || cachedLatestId !== latestId) {
@@ -275,8 +277,8 @@ async function fetchAccountStatuses(accountId, sourceClient) {
       let maxId = null;
       const limit = 40; // 1リクエストあたりの最大投稿数
       
-      // 最大3000件の投稿を取得するまでループ
-      while (allStatuses.length < 3000) {
+      // 最大MAX_STATUSES件の投稿を取得するまでループ
+      while (allStatuses.length < maxStatuses) {
         try {
           const options = { limit: limit };
           if (maxId) {
@@ -324,9 +326,9 @@ async function fetchAccountStatuses(accountId, sourceClient) {
       console.log(`${newStatuses.length}件の新しい投稿を追加しました`);
     }
     
-    // 3000件を超えた場合は切り詰め
-    if (allStatuses.length > 3000) {
-      allStatuses = allStatuses.slice(0, 3000);
+    // MAX_STATUSES件を超えた場合は切り詰め
+    if (allStatuses.length > maxStatuses) {
+      allStatuses = allStatuses.slice(0, maxStatuses);
     }
     
     // 更新されたデータをキャッシュに保存
@@ -334,7 +336,11 @@ async function fetchAccountStatuses(accountId, sourceClient) {
   } else {
     console.log('新しい投稿はありません。キャッシュを使用します');
   }
-  
+  // MAX_STATUSES件を超えた場合は切り詰め
+  if (allStatuses.length > maxStatuses) {
+    allStatuses = allStatuses.slice(0, maxStatuses);
+  }
+
   console.log(`取得完了: 合計${allStatuses.length}件の投稿を使用します`);
   return allStatuses;
 }
@@ -360,7 +366,7 @@ function loadHistory(accountId) {
   try {
     const historyFile = getHistoryFilePath(accountId);
     const data = fs.readFileSync(historyFile, 'utf8');
-    return JSON.parse(data).history;
+    return JSON.parse(data || '{}').history || [];
   } catch (error) {
     console.error('履歴の読み込み中にエラーが発生しました:', error);
     return [];
@@ -395,6 +401,21 @@ function getSystemPrompt() {
   return prompt;
 }
 
+// 現在時刻をフォーマットして取得する関数
+function getFormattedDateTime() {
+  const now = new Date();
+  return now.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).replace(/\//g, '/').replace(/,/g, '');
+}
+
+
 // Geminiモデルを使って文章を生成する関数
 async function generateTextWithGemini(statuses, accountId) {
   const MAX_RETRIES = 10;
@@ -409,10 +430,10 @@ async function generateTextWithGemini(statuses, accountId) {
       console.log('Geminiを使用して文章を生成します...');
       
       // ステータスの内容を結合して、シンプルなコーパスを作成
-      const statusesText = statuses.join('\n\n');
+      const statusesText = JSON.stringify(statuses);
       
       // 履歴の内容を結合
-      const historyText = history.map(h => h.text).join('\n\n');
+      const historyText = JSON.stringify(history.map(h => h.text));
       
       // Geminiモデルの設定
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -420,19 +441,16 @@ async function generateTextWithGemini(statuses, accountId) {
       
       // プロンプトの作成
       const prompt = `
-以下の文章は、あるTwitterユーザーの過去の投稿の集まりです。
-これらの投稿の文体と内容から、そのユーザーが書きそうな新しい投稿を1つ生成してください。
+#前提情報
+今日は${getFormattedDateTime()}です。
 
 ${getSystemPrompt()}
 
-最近生成された投稿 ここから:
-${historyText}
-
-最近生成された投稿 ここまで:
-
-参考投稿:
+#参考投稿（JSON形式）:
 ${statusesText}
 `;
+
+      console.log(prompt);
 
       // 生成の実行
       const result = await model.generateContent(prompt);
