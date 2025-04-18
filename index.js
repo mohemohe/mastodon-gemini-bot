@@ -294,6 +294,7 @@ async function fetchAccountStatuses(accountId, sourceClient) {
           // 投稿からテキスト内容のみを抽出して配列に追加
           const statusTexts = statuses
             .filter(status => !status.reblog) // リブログは除外
+            .filter(status => !status.replies_count) // リプライは除外
             .filter(status => status.visibility === 'public') // publicのみを対象にする
             .map(status => {
               // HTML要素を除去してプレーンテキストだけを取得
@@ -384,11 +385,21 @@ function saveHistory(text, accountId) {
   }
 }
 
+// システムプロンプトを読み込む関数
+function getSystemPrompt() {
+  const promptPath = path.join(__dirname, '.systemprompt');
+  if (!fs.existsSync(promptPath)) {
+    return process.env.SYSTEM_PROMPT || '';
+  }
+  const prompt = fs.readFileSync(promptPath, 'utf8');
+  return prompt;
+}
+
 // Geminiモデルを使って文章を生成する関数
 async function generateTextWithGemini(statuses, accountId) {
   const MAX_RETRIES = 10;
   let retryCount = 0;
-  
+
   // 履歴の初期化
   ensureHistoryFile(accountId);
   const history = loadHistory(accountId);
@@ -409,20 +420,18 @@ async function generateTextWithGemini(statuses, accountId) {
       
       // プロンプトの作成
       const prompt = `
-以下の文章は、あるMastodonユーザーの過去の投稿の集まりです。
-これらの投稿の文体と内容を学習して、そのユーザーが書きそうな新しい投稿を1つ生成してください。
+以下の文章は、あるTwitterユーザーの過去の投稿の集まりです。
+これらの投稿の文体と内容から、そのユーザーが書きそうな新しい投稿を1つ生成してください。
 
-以下の点に注意してください：
-- 生成する文章は、1文のみで、短すぎず長すぎず、元の投稿と同じような雰囲気を持ち、自然に見えるようにしてください
-- 装飾やメタ情報は含めず、純粋に投稿文のみを出力してください
-- 文末の句点「。」は省いてください
-- 以下の「最近生成された投稿」と似た内容は生成しないでください
+${getSystemPrompt()}
+
+最近生成された投稿 ここから:
+${historyText}
+
+最近生成された投稿 ここまで:
 
 参考投稿:
 ${statusesText}
-
-最近生成された投稿:
-${historyText}
 `;
 
       // 生成の実行
