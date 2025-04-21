@@ -1,11 +1,9 @@
-require('dotenv').config();
-const cron = require('node-cron');
-const { runMain } = require('./index');
+import 'dotenv/config';
+import cron from 'node-cron';
+import { runMain } from './index';
 
-// 環境変数からスケジュール設定を取得
-const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '0,20,40 * * * *'; // デフォルト: 毎時0分から20分ごと
+const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '0,20,40 * * * *';
 
-// スケジュール式が有効か確認
 if (!cron.validate(CRON_SCHEDULE)) {
   console.error(`エラー: 無効なcron式です: ${CRON_SCHEDULE}`);
   console.error('正しい形式で指定してください。例: "0,20,40 * * * *" (毎時0分から20分ごと)');
@@ -14,10 +12,8 @@ if (!cron.validate(CRON_SCHEDULE)) {
 
 console.log(`定期実行を開始します。スケジュール: ${CRON_SCHEDULE}`);
 
-// cronジョブを登録
 cron.schedule(CRON_SCHEDULE, async () => {
   console.log(`${new Date().toISOString()} - 定期実行を開始します`);
-  
   try {
     await runMain();
     console.log(`${new Date().toISOString()} - 定期実行が完了しました`);
@@ -26,4 +22,4 @@ cron.schedule(CRON_SCHEDULE, async () => {
   }
 });
 
-console.log(`${new Date().toISOString()} - 定期実行を待機します`);
+console.log(`${new Date().toISOString()} - 定期実行を待機します`); 

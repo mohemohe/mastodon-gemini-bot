@@ -1,8 +1,9 @@
-require('dotenv').config();
-const generator = require('megalodon');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const fs = require('fs');
-const path = require('path');
+import 'dotenv/config';
+import generator from 'megalodon';
+import type { MegalodonInterface } from 'megalodon';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // 投稿取得元の環境変数の取得と検証
 const SOURCE_BASE_URL = process.env.MASTODON_BASE_URL || '';
@@ -19,19 +20,16 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro';
 
 // 履歴の保持件数
-const HISTORY_LIMIT = parseInt(process.env.HISTORY_LIMIT || '5', 10);
+const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
 
 // アカウントIDキャッシュファイルのパス
 const CACHE_DIR = path.join(__dirname, 'cache');
 
-// 必要な環境変数が設定されているか確認
-function validateEnvVariables() {
+function validateEnvVariables(): boolean {
   if (!SOURCE_BASE_URL || !SOURCE_ACCESS_TOKEN || !SOURCE_USERNAME || !GEMINI_API_KEY) {
     console.error('エラー: 必要な環境変数が設定されていません。.envファイルを確認してください。');
     return false;
   }
-
-  // 投稿機能を使用する場合は必要な環境変数をチェック
   if (BOT_POST_ENABLED && (!BOT_BASE_URL || !BOT_ACCESS_TOKEN)) {
     console.error('エラー: 投稿機能を有効にするには、BOT_BASE_URLとBOT_ACCESS_TOKENが必要です。');
     return false;
@@ -39,224 +37,188 @@ function validateEnvVariables() {
   return true;
 }
 
-// Mastodon クライアントの初期化（ソースアカウント用）
-function initSourceClient() {
-  return generator.default('mastodon', SOURCE_BASE_URL, SOURCE_ACCESS_TOKEN);
+function initSourceClient(): MegalodonInterface {
+  return generator('mastodon', SOURCE_BASE_URL, SOURCE_ACCESS_TOKEN);
 }
 
-// Mastodon クライアントの初期化（投稿用Botアカウント用）
-function initBotClient() {
+function initBotClient(): MegalodonInterface | null {
   if (BOT_POST_ENABLED) {
-    const client = generator.default('mastodon', BOT_BASE_URL, BOT_ACCESS_TOKEN);
+    const client = generator('mastodon', BOT_BASE_URL, BOT_ACCESS_TOKEN);
     console.log('Bot投稿機能が有効になっています');
     return client;
   }
   return null;
 }
 
-// ユーザー名からアカウントIDを解決する関数
-async function resolveAccountId(username, sourceClient) {
+type Account = {
+  id: string;
+  acct: string;
+  username: string;
+};
+
+type Status = {
+  id: string;
+  content: string;
+  reblog?: unknown;
+  replies_count?: number;
+  visibility: string;
+  url?: string;
+};
+
+function extractPublicStatusTexts(statuses: Status[]): string[] {
+  return statuses
+    .filter(status => !status.reblog)
+    .filter(status => !status.replies_count)
+    .filter(status => status.visibility === 'public')
+    .map(status => status.content.replace(/<[^>]*>/g, ''))
+    .filter(text => text.trim().length > 0);
+}
+
+async function resolveAccountId(username: string, sourceClient: MegalodonInterface): Promise<string> {
   try {
-    // @から始まる場合は@を取り除く
-    const cleanUsername = username.startsWith('@') 
-      ? username.substring(1) 
-      : username;
-    
+    const cleanUsername = username.startsWith('@') ? username.substring(1) : username;
     console.log(`ユーザー名 '${cleanUsername}' からアカウントIDを取得します...`);
-    
-    // ユーザー名の形式をチェック
     const isRemoteUser = cleanUsername.includes('@');
     const searchQuery = isRemoteUser ? cleanUsername : `@${cleanUsername}`;
-    
-    // 検索エンドポイントを使用して検索
     const res = await sourceClient.search(searchQuery, { type: 'accounts', limit: 10 });
-    const accounts = res.data.accounts;
-    
+    const accounts: Account[] = res.data.accounts;
     if (accounts.length === 0) {
       throw new Error(`ユーザー名 '${cleanUsername}' に一致するアカウントが見つかりませんでした`);
     }
-    
-    // 完全一致または部分一致でアカウントを検索
     const exactMatch = accounts.find(account => {
       const acct = account.acct.toLowerCase();
-      const username = account.username.toLowerCase();
+      const uname = account.username.toLowerCase();
       const cleanUsernameL = cleanUsername.toLowerCase();
-      
-      // リモートユーザーの場合は完全一致のみ
       if (isRemoteUser) {
         return acct === cleanUsernameL;
       }
-      
-      // ローカルユーザーの場合は、リモートユーザーを除外してから検索
       if (acct.includes('@')) {
-        return false; // リモートユーザーはスキップ
+        return false;
       }
-      return acct === cleanUsernameL || username === cleanUsernameL;
+      return acct === cleanUsernameL || uname === cleanUsernameL;
     });
-    
     if (exactMatch) {
       console.log(`ユーザー名 '${cleanUsername}' のアカウントIDは '${exactMatch.id}' です`);
       return exactMatch.id;
     }
-    
-    // 完全一致がなければ最初の結果を使用
     console.log(`注意: '${cleanUsername}' の完全一致が見つからなかったため、最も関連性の高い結果を使用します: ${accounts[0].acct} (ID: ${accounts[0].id})`);
     return accounts[0].id;
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('アカウントIDの解決中にエラーが発生しました:', error);
     throw new Error(`ユーザー名 '${username}' からアカウントIDを取得できませんでした`);
   }
 }
 
-// Botアカウントから投稿する関数
-async function postToBot(text, botClient) {
+async function postToBot(text: string, botClient: MegalodonInterface | null): Promise<unknown> {
   if (!BOT_POST_ENABLED || !botClient) {
     console.log('Bot投稿機能が無効になっているため、投稿はスキップされました');
     return null;
   }
-  
   try {
     console.log('生成されたテキストをBotアカウントから投稿します...');
     const response = await botClient.postStatus(text, { visibility: 'public' });
-    console.log(`投稿が完了しました: ${response.data.url}`);
-    return response.data;
-  } catch (error) {
+    const data = response.data as { url?: string };
+    console.log(`投稿が完了しました: ${data.url ?? ''}`);
+    return data;
+  } catch (error: unknown) {
     console.error('投稿中にエラーが発生しました:', error);
     return null;
   }
 }
 
-// キャッシュディレクトリの確認と作成
-function ensureCacheDirectory() {
+function ensureCacheDirectory(): void {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     console.log(`キャッシュディレクトリを作成しました: ${CACHE_DIR}`);
   }
 }
 
-// キャッシュから投稿を読み込む関数
-function loadStatusesFromCache(STATUSES_CACHE_FILE) {
+function loadStatusesFromCache(STATUSES_CACHE_FILE: string): { statuses: string[]; latest_id: string | null } {
   try {
     if (fs.existsSync(STATUSES_CACHE_FILE)) {
       const data = fs.readFileSync(STATUSES_CACHE_FILE, 'utf8');
       const cachedData = JSON.parse(data);
       console.log(`キャッシュから${cachedData.statuses.length}件の投稿を読み込みました`);
-      return { 
+      return {
         statuses: cachedData.statuses,
         latest_id: cachedData.latest_id
       };
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('キャッシュの読み込み中にエラーが発生しました:', error);
   }
   return { statuses: [], latest_id: null };
 }
 
-// キャッシュに投稿を保存する関数
-function saveStatusesToCache(statuses, latest_id, STATUSES_CACHE_FILE, LATEST_ID_CACHE_FILE) {
+function saveStatusesToCache(statuses: string[], latest_id: string, STATUSES_CACHE_FILE: string, LATEST_ID_CACHE_FILE: string): void {
   try {
-    const data = JSON.stringify({ 
+    const data = JSON.stringify({
       statuses: statuses,
       latest_id: latest_id,
       updated_at: new Date().toISOString()
     }, null, 2);
     fs.writeFileSync(STATUSES_CACHE_FILE, data, 'utf8');
     console.log(`${statuses.length}件の投稿をキャッシュに保存しました`);
-    
-    // 最新のIDも別のファイルに保存（簡易アクセス用）
     fs.writeFileSync(LATEST_ID_CACHE_FILE, JSON.stringify({ latest_id: latest_id }, null, 2), 'utf8');
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('キャッシュの保存中にエラーが発生しました:', error);
   }
 }
 
-// 最新の投稿IDを取得する関数
-async function fetchLatestStatusId(accountId, sourceClient) {
+async function fetchLatestStatusId(accountId: string, sourceClient: MegalodonInterface): Promise<string | null> {
   try {
     const res = await sourceClient.getAccountStatuses(accountId, { limit: 1 });
-    const statuses = res.data;
-    
+    const statuses: Status[] = res.data;
     if (statuses.length > 0) {
       return statuses[0].id;
     }
     return null;
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('最新の投稿ID取得中にエラーが発生しました:', error);
     return null;
   }
 }
 
-// 新しい投稿を取得する関数
-async function fetchNewStatuses(accountId, since_id, sourceClient) {
+async function fetchNewStatuses(accountId: string, since_id: string, sourceClient: MegalodonInterface): Promise<string[]> {
   console.log(`ID: ${since_id} より新しい投稿を取得します...`);
-  
-  let allNewStatuses = [];
-  let maxId = null;
-  const limit = 40; // 1リクエストあたりの最大投稿数
-  
+  let allNewStatuses: string[] = [];
+  let maxId: string | null = null;
+  const limit = 40;
   while (true) {
     try {
-      const options = { 
+      const options: Record<string, unknown> = {
         limit: limit,
         since_id: since_id
       };
-      
       if (maxId) {
-        options.max_id = maxId;
+        (options as Record<string, string>).max_id = maxId;
       }
-      
       const res = await sourceClient.getAccountStatuses(accountId, options);
-      const statuses = res.data;
-      
+      const statuses: Status[] = res.data;
       if (statuses.length === 0) {
         break;
       }
-      
-      // 投稿からテキスト内容のみを抽出して配列に追加
-      const statusTexts = statuses
-        .filter(status => !status.reblog) // リブログは除外
-        .filter(status => status.visibility === 'public') // publicのみを対象にする
-        .map(status => {
-          // HTML要素を除去してプレーンテキストだけを取得
-          const text = status.content.replace(/<[^>]*>/g, '');
-          return text;
-        })
-        .filter(text => text.trim().length > 0); // 空のテキストを除外
-      
+      const statusTexts = extractPublicStatusTexts(statuses);
       allNewStatuses = allNewStatuses.concat(statusTexts);
       console.log(`${allNewStatuses.length}件の新しい投稿を取得しました`);
-      
-      // 次のページ用にmaxIdを設定
       maxId = statuses[statuses.length - 1].id;
-      
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('投稿の取得中にエラーが発生しました:', error);
       break;
     }
   }
-  
   return allNewStatuses;
 }
 
-// アカウントの投稿を取得する関数（キャッシュ対応版）
-async function fetchAccountStatuses(accountId, sourceClient) {
+async function fetchAccountStatuses(accountId: string, sourceClient: MegalodonInterface): Promise<string[]> {
   console.log('投稿の取得を開始します...');
-  
-  // キャッシュファイルのパスを設定
   const STATUSES_CACHE_FILE = path.join(CACHE_DIR, `statuses_${accountId}.json`);
   const LATEST_ID_CACHE_FILE = path.join(CACHE_DIR, `latest_id_${accountId}.json`);
-  
-  // キャッシュディレクトリの確認
   ensureCacheDirectory();
-  
-  // キャッシュからデータを読み込む
   const cachedData = loadStatusesFromCache(STATUSES_CACHE_FILE);
-  let allStatuses = cachedData.statuses;
-  let cachedLatestId = cachedData.latest_id;
-  
-  // 最新の投稿IDを取得
+  let allStatuses: string[] = cachedData.statuses;
+  const cachedLatestId = cachedData.latest_id;
   const latestId = await fetchLatestStatusId(accountId, sourceClient);
-  
   if (!latestId) {
     console.error('最新の投稿IDを取得できませんでした');
     if (allStatuses.length > 0) {
@@ -265,93 +227,58 @@ async function fetchAccountStatuses(accountId, sourceClient) {
     }
     return [];
   }
-
-  const maxStatuses = parseInt(process.env.MAX_STATUSES || '3000', 10);
-  
-  // キャッシュがない場合、または最新IDが更新されている場合は新しい投稿を取得
+  const maxStatuses = Number.parseInt(process.env.MAX_STATUSES || '3000', 10);
   if (allStatuses.length === 0 || cachedLatestId !== latestId) {
     if (allStatuses.length === 0) {
       console.log('キャッシュがないため、最初から投稿を取得します');
-      
-      // キャッシュがない場合は全件取得
-      let maxId = null;
-      const limit = 40; // 1リクエストあたりの最大投稿数
-      
-      // 最大MAX_STATUSES件の投稿を取得するまでループ
+      let maxId: string | null = null;
+      const limit = 40;
       while (allStatuses.length < maxStatuses) {
         try {
-          const options = { limit: limit };
+          const options: Record<string, unknown> = { limit: limit };
           if (maxId) {
-            options.max_id = maxId;
+            (options as Record<string, string>).max_id = maxId;
           }
-          
           const res = await sourceClient.getAccountStatuses(accountId, options);
-          const statuses = res.data;
-          
+          const statuses: Status[] = res.data;
           if (statuses.length === 0) {
             console.log('これ以上の投稿はありません');
             break;
           }
-          
-          // 投稿からテキスト内容のみを抽出して配列に追加
-          const statusTexts = statuses
-            .filter(status => !status.reblog) // リブログは除外
-            .filter(status => !status.replies_count) // リプライは除外
-            .filter(status => status.visibility === 'public') // publicのみを対象にする
-            .map(status => {
-              // HTML要素を除去してプレーンテキストだけを取得
-              const text = status.content.replace(/<[^>]*>/g, '');
-              return text;
-            })
-            .filter(text => text.trim().length > 0); // 空のテキストを除外
-          
+          const statusTexts = extractPublicStatusTexts(statuses);
           allStatuses = allStatuses.concat(statusTexts);
           console.log(`${allStatuses.length}件の投稿を取得しました`);
-          
-          // 次のページ用にmaxIdを設定
           maxId = statuses[statuses.length - 1].id;
-          
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('投稿の取得中にエラーが発生しました:', error);
           break;
         }
       }
     } else {
       console.log('新しい投稿が見つかりました。キャッシュを更新します');
-      // キャッシュがあり、新しい投稿がある場合は差分だけを取得
-      const newStatuses = await fetchNewStatuses(accountId, cachedLatestId, sourceClient);
-      
-      // 新しい投稿を既存の投稿リストの先頭に追加
+      const newStatuses = await fetchNewStatuses(accountId, cachedLatestId as string, sourceClient);
       allStatuses = newStatuses.concat(allStatuses);
       console.log(`${newStatuses.length}件の新しい投稿を追加しました`);
     }
-    
-    // MAX_STATUSES件を超えた場合は切り詰め
     if (allStatuses.length > maxStatuses) {
       allStatuses = allStatuses.slice(0, maxStatuses);
     }
-    
-    // 更新されたデータをキャッシュに保存
-    saveStatusesToCache(allStatuses, latestId, STATUSES_CACHE_FILE, LATEST_ID_CACHE_FILE);
+    saveStatusesToCache(allStatuses, latestId as string, STATUSES_CACHE_FILE, LATEST_ID_CACHE_FILE);
   } else {
     console.log('新しい投稿はありません。キャッシュを使用します');
   }
-  // MAX_STATUSES件を超えた場合は切り詰め
   if (allStatuses.length > maxStatuses) {
     allStatuses = allStatuses.slice(0, maxStatuses);
   }
-
   console.log(`取得完了: 合計${allStatuses.length}件の投稿を使用します`);
   return allStatuses;
 }
 
-// 履歴ファイルのパスを取得する関数
-function getHistoryFilePath(accountId) {
+function getHistoryFilePath(accountId: string): string {
   return path.join(CACHE_DIR, `history_${accountId}.json`);
 }
 
-// 履歴ファイルの確認と作成
-function ensureHistoryFile(accountId) {
+function ensureHistoryFile(accountId: string): void {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
   }
@@ -361,38 +288,33 @@ function ensureHistoryFile(accountId) {
   }
 }
 
-// 履歴を読み込む関数
-function loadHistory(accountId) {
+function loadHistory(accountId: string): { text: string; timestamp: string }[] {
   try {
     const historyFile = getHistoryFilePath(accountId);
     const data = fs.readFileSync(historyFile, 'utf8');
     return JSON.parse(data || '{}').history || [];
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('履歴の読み込み中にエラーが発生しました:', error);
     return [];
   }
 }
 
-// 履歴を保存する関数
-function saveHistory(text, accountId) {
+function saveHistory(text: string, accountId: string): void {
   try {
     const history = loadHistory(accountId);
     history.unshift({
       text: text,
       timestamp: new Date().toISOString()
     });
-    
-    // 設定された件数まで保持
     const trimmedHistory = history.slice(0, HISTORY_LIMIT);
     const historyFile = getHistoryFilePath(accountId);
     fs.writeFileSync(historyFile, JSON.stringify({ history: trimmedHistory }, null, 2));
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('履歴の保存中にエラーが発生しました:', error);
   }
 }
 
-// システムプロンプトを読み込む関数
-function getSystemPrompt() {
+function getSystemPrompt(): string {
   const promptPath = path.join(__dirname, '.systemprompt');
   if (!fs.existsSync(promptPath)) {
     return process.env.SYSTEM_PROMPT || '';
@@ -401,8 +323,7 @@ function getSystemPrompt() {
   return prompt;
 }
 
-// 現在時刻をフォーマットして取得する関数
-function getFormattedDateTime() {
+function getFormattedDateTime(): string {
   const now = new Date();
   return now.toLocaleString('ja-JP', {
     year: 'numeric',
@@ -415,63 +336,31 @@ function getFormattedDateTime() {
   }).replace(/\//g, '/').replace(/,/g, '');
 }
 
-
-// Geminiモデルを使って文章を生成する関数
-async function generateTextWithGemini(statuses, accountId) {
+async function generateTextWithGemini(statuses: string[], accountId: string): Promise<string | null> {
   const MAX_RETRIES = 10;
   let retryCount = 0;
-
-  // 履歴の初期化
   ensureHistoryFile(accountId);
   const history = loadHistory(accountId);
-  
   while (retryCount < MAX_RETRIES) {
     try {
       console.log('Geminiを使用して文章を生成します...');
-      
-      // ステータスの内容を結合して、シンプルなコーパスを作成
       const statusesText = JSON.stringify(statuses);
-      
-      // 履歴の内容を結合
       const historyText = JSON.stringify(history.map(h => h.text));
-      
-      // Geminiモデルの設定
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-      
-      // プロンプトの作成
-      const prompt = `
-#前提情報
-今日は${getFormattedDateTime()}です。
-
-${getSystemPrompt()}
-
-#参考投稿（JSON形式）:
-${statusesText}
-`;
-
+      const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
       console.log(prompt);
-
-      // 生成の実行
       const result = await model.generateContent(prompt);
       const response = result.response;
       let generatedText = response.text().trim();
-      
-      // 末尾の連続した改行を削除
       generatedText = generatedText.replace(/[\r\n]+$/, '');
-      
-      // 履歴に保存
       saveHistory(generatedText, accountId);
-      
-      // #botタグを追加
-      generatedText = generatedText + ' #bot';
-      
+      generatedText = `${generatedText} #bot`;
       return generatedText;
-    } catch (error) {
-      if (error.message.includes('RECITATION') && retryCount < MAX_RETRIES - 1) {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message && error.message.includes('RECITATION') && retryCount < MAX_RETRIES - 1) {
         retryCount++;
         console.log(`RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
-        // 少し待機してからリトライ
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
@@ -479,60 +368,55 @@ ${statusesText}
       return null;
     }
   }
-  
   console.error(`最大リトライ回数(${MAX_RETRIES}回)に達しました`);
   return null;
 }
 
-// メイン処理を行う関数
-async function runMain() {
+function getRandomSample<T>(array: T[], n: number): T[] {
+  if (n >= array.length) {
+    return array;
+  }
+  const shuffled = array.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, n);
+}
+
+export async function runMain(): Promise<void> {
   try {
-    // 環境変数の検証
     if (!validateEnvVariables()) {
       process.exit(1);
     }
-    
-    // クライアントの初期化
     const sourceClient = initSourceClient();
     const botClient = initBotClient();
-    
-    // ユーザー名からアカウントIDを解決
     const accountId = await resolveAccountId(SOURCE_USERNAME, sourceClient);
-    
-    // 投稿の取得
     const statuses = await fetchAccountStatuses(accountId, sourceClient);
-    
     if (statuses.length === 0) {
       console.log('投稿が見つかりませんでした。プログラムを終了します。');
       return;
     }
-    
-    // 文章の生成
-    const generatedText = await generateTextWithGemini(statuses, accountId);
-    
+    const RANDOM_SAMPLE_SIZE = Number.parseInt(process.env.RANDOM_SAMPLE_SIZE || '500', 10);
+    const sampleSize = Math.min(statuses.length, RANDOM_SAMPLE_SIZE);
+    const randomStatuses = getRandomSample(statuses, sampleSize);
+    console.log(`${statuses.length}件の投稿からランダムに${randomStatuses.length}件を抽出しました`);
+    const generatedText = await generateTextWithGemini(randomStatuses, accountId);
     if (generatedText) {
       console.log('\n===== 生成された文章 =====\n');
       console.log(generatedText);
       console.log('\n=========================\n');
-      
-      // Botアカウントで投稿
       if (BOT_POST_ENABLED) {
         await postToBot(generatedText, botClient);
       }
     } else {
       console.log('文章を生成できませんでした。');
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('エラーが発生しました:', error);
   }
 }
 
-// モジュールとしてエクスポートする場合は関数をエクスポート
-module.exports = {
-  runMain
-};
-
-// ファイルが直接実行された場合はmain関数を実行
 if (require.main === module) {
   runMain();
 } 

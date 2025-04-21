@@ -2,13 +2,18 @@
   "name": "mastodon-gemini-bot",
   "version": "1.0.0",
   "description": "Mastodonアカウントの投稿履歴を取得し、Google Gemini AIを使って新しい投稿文を生成するツール",
-  "main": "index.js",
+  "main": "index.ts",
   "scripts": {
-    "start": "node index.js",
-    "cron": "node cron.js",
+    "start": "tsx index.ts",
+    "cron": "tsx cron.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["mastodon", "gemini", "ai", "bot"],
+  "keywords": [
+    "mastodon",
+    "gemini",
+    "ai",
+    "bot"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -16,5 +21,12 @@
     "dotenv": "^16.4.5",
     "megalodon": "^10.1.1",
     "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^22.14.1",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
   }
 }
