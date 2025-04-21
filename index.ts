@@ -71,6 +71,7 @@ function extractPublicStatusTexts(statuses: Status[]): string[] {
     .filter(status => !status.replies_count)
     .filter(status => status.visibility === 'public')
     .map(status => status.content.replace(/<[^>]*>/g, ''))
+    .filter(text => !text.startsWith('@'))
     .filter(text => text.trim().length > 0);
 }
 
