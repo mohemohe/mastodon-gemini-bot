@@ -212,16 +212,8 @@ async function fetchNewStatuses(accountId, since_id, sourceClient) {
         break;
       }
       
-      // 投稿からテキスト内容のみを抽出して配列に追加
-      const statusTexts = statuses
-        .filter(status => !status.reblog) // リブログは除外
-        .filter(status => status.visibility === 'public') // publicのみを対象にする
-        .map(status => {
-          // HTML要素を除去してプレーンテキストだけを取得
-          const text = status.content.replace(/<[^>]*>/g, '');
-          return text;
-        })
-        .filter(text => text.trim().length > 0); // 空のテキストを除外
+      // 共通関数で投稿からテキスト内容のみを抽出
+      const statusTexts = extractPlainTextsFromStatuses(statuses);
       
       allNewStatuses = allNewStatuses.concat(statusTexts);
       console.log(`${allNewStatuses.length}件の新しい投稿を取得しました`);
@@ -252,7 +244,7 @@ async function fetchAccountStatuses(accountId, sourceClient) {
   // キャッシュからデータを読み込む
   const cachedData = loadStatusesFromCache(STATUSES_CACHE_FILE);
   let allStatuses = cachedData.statuses;
-  let cachedLatestId = cachedData.latest_id;
+  const cachedLatestId = cachedData.latest_id;
   
   // 最新の投稿IDを取得
   const latestId = await fetchLatestStatusId(accountId, sourceClient);
@@ -293,17 +285,8 @@ async function fetchAccountStatuses(accountId, sourceClient) {
             break;
           }
           
-          // 投稿からテキスト内容のみを抽出して配列に追加
-          const statusTexts = statuses
-            .filter(status => !status.reblog) // リブログは除外
-            .filter(status => !status.replies_count) // リプライは除外
-            .filter(status => status.visibility === 'public') // publicのみを対象にする
-            .map(status => {
-              // HTML要素を除去してプレーンテキストだけを取得
-              const text = status.content.replace(/<[^>]*>/g, '');
-              return text;
-            })
-            .filter(text => text.trim().length > 0); // 空のテキストを除外
+          // 共通関数で投稿からテキスト内容のみを抽出
+          const statusTexts = extractPlainTextsFromStatuses(statuses);
           
           allStatuses = allStatuses.concat(statusTexts);
           console.log(`${allStatuses.length}件の投稿を取得しました`);
@@ -415,6 +398,19 @@ function getFormattedDateTime() {
   }).replace(/\//g, '/').replace(/,/g, '');
 }
 
+// 投稿配列からプレーンテキストを抽出する共通関数
+function extractPlainTextsFromStatuses(statuses) {
+  return statuses
+    .filter(status => !status.reblog) // リブログは除外
+    .filter(status => !status.replies_count) // リプライは除外
+    .filter(status => status.visibility === 'public') // publicのみを対象にする
+    .map(status => {
+      // HTML要素を除去してプレーンテキストだけを取得
+      const text = status.content.replace(/<[^>]*>/g, '');
+      return text;
+    })
+    .filter(text => text.trim().length > 0); // 空のテキストを除外
+}
 
 // Geminiモデルを使って文章を生成する関数
 async function generateTextWithGemini(statuses, accountId) {
@@ -507,8 +503,14 @@ async function runMain() {
       return;
     }
     
+    // ランダムに500件を抽出
+    const RANDOM_SAMPLE_SIZE = Number.parseInt(process.env.RANDOM_SAMPLE_SIZE || '500', 10);
+    const sampleSize = Math.min(statuses.length, RANDOM_SAMPLE_SIZE);
+    const randomStatuses = getRandomSample(statuses, sampleSize);
+    console.log(`${statuses.length}件の投稿からランダムに${randomStatuses.length}件を抽出しました`);
+    
     // 文章の生成
-    const generatedText = await generateTextWithGemini(statuses, accountId);
+    const generatedText = await generateTextWithGemini(randomStatuses, accountId);
     
     if (generatedText) {
       console.log('\n===== 生成された文章 =====\n');
@@ -525,6 +527,25 @@ async function runMain() {
   } catch (error) {
     console.error('エラーが発生しました:', error);
   }
+}
+
+// 配列からランダムにn個のサンプルを取得する関数
+function getRandomSample(array, n) {
+  if (n >= array.length) {
+    return array;
+  }
+  
+  // 配列をコピーして元の配列を変更しないようにする
+  const shuffled = array.slice();
+  
+  // Fisher-Yatesアルゴリズムでシャッフル
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  
+  // 最初のn個を返す
+  return shuffled.slice(0, n);
 }
 
 // モジュールとしてエクスポートする場合は関数をエクスポート
