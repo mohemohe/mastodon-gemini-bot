@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mastodon-gemini-bot:
     build:
@@ -11,3 +9,4 @@ services:
       - .env  # 環境変数を.envファイルから読み込み
     volumes:
       - ./cache:/app/cache  # キャッシュデータを永続化
+      - .systemprompt:/app/.systemprompt

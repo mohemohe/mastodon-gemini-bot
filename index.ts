@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import generator from 'megalodon';
 import type { MegalodonInterface } from 'megalodon';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -341,19 +341,19 @@ async function generateTextWithGemini(statuses: string[], accountId: string): Pr
   const MAX_RETRIES = 10;
   let retryCount = 0;
   ensureHistoryFile(accountId);
-  const history = loadHistory(accountId);
   while (retryCount < MAX_RETRIES) {
     try {
       console.log('Geminiを使用して文章を生成します...');
       const statusesText = JSON.stringify(statuses);
-      const historyText = JSON.stringify(history.map(h => h.text));
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+      const model = new ChatGoogleGenerativeAI({
+        model: GEMINI_MODEL,
+        apiKey: GEMINI_API_KEY,
+        temperature: 0.7
+      });
       const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
       console.log(prompt);
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      let generatedText = response.text().trim();
+      const result = await model.invoke([{ role: 'user', content: prompt }]);
+      let generatedText = result.content.toString().trim();
       generatedText = generatedText.replace(/[\r\n]+$/, '');
       saveHistory(generatedText, accountId);
       generatedText = `${generatedText} #bot`;

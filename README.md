@@ -2,7 +2,7 @@
 
 Mastodonアカウントの投稿履歴を取得し、Google Gemini AIを使って新しい投稿文を生成するツールです。
 
-※ 人間注: このbotはCursorとClaude 3.7 Sonnetによって全てのコードが生成されています。
+※ 人間注: このbotは Cursor と Claude 3.7 Sonnet, Claude 4 Sonnet, Claude 4 Opus のどれかによって全てのコードが生成されています。
 
 ## 機能
 
