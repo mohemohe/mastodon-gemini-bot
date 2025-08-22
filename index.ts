@@ -2,6 +2,9 @@ import 'dotenv/config';
 import generator from 'megalodon';
 import type { MegalodonInterface } from 'megalodon';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { ChatGroq } from '@langchain/groq';
+import { ChatOpenAI } from '@langchain/openai';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -15,9 +18,21 @@ const BOT_BASE_URL = process.env.BOT_BASE_URL || '';
 const BOT_ACCESS_TOKEN = process.env.BOT_ACCESS_TOKEN || '';
 const BOT_POST_ENABLED = (process.env.BOT_POST_ENABLED || 'false').toLowerCase() === 'true';
 
+// LLM プロバイダーの設定
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
+
 // Gemini APIの環境変数
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+// LM Studio APIの環境変数
+const LM_STUDIO_BASE_URL = process.env.LM_STUDIO_BASE_URL || 'http://localhost:1234/v1';
+const LM_STUDIO_MODEL = process.env.LM_STUDIO_MODEL || 'local-model';
+const LM_STUDIO_API_KEY = process.env.LM_STUDIO_API_KEY || 'lm-studio';
+
+// Groq APIの環境変数
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 // 履歴の保持件数
 const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
@@ -26,14 +41,31 @@ const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
 const CACHE_DIR = path.join(__dirname, 'cache');
 
 function validateEnvVariables(): boolean {
-  if (!SOURCE_BASE_URL || !SOURCE_ACCESS_TOKEN || !SOURCE_USERNAME || !GEMINI_API_KEY) {
+  if (!SOURCE_BASE_URL || !SOURCE_ACCESS_TOKEN || !SOURCE_USERNAME) {
     console.error('エラー: 必要な環境変数が設定されていません。.envファイルを確認してください。');
     return false;
   }
+  
+  if (LLM_PROVIDER === 'gemini' && !GEMINI_API_KEY) {
+    console.error('エラー: Gemini プロバイダーを使用する場合、GEMINI_API_KEYが必要です。');
+    return false;
+  }
+  
+  if (LLM_PROVIDER === 'lmstudio' && !LM_STUDIO_BASE_URL) {
+    console.error('エラー: LM Studio プロバイダーを使用する場合、LM_STUDIO_BASE_URLが必要です。');
+    return false;
+  }
+  
+  if (LLM_PROVIDER === 'groq' && !GROQ_API_KEY) {
+    console.error('エラー: Groq プロバイダーを使用する場合、GROQ_API_KEYが必要です。');
+    return false;
+  }
+  
   if (BOT_POST_ENABLED && (!BOT_BASE_URL || !BOT_ACCESS_TOKEN)) {
     console.error('エラー: 投稿機能を有効にするには、BOT_BASE_URLとBOT_ACCESS_TOKENが必要です。');
     return false;
   }
+  
   return true;
 }
 
@@ -337,20 +369,49 @@ function getFormattedDateTime(): string {
   }).replace(/\//g, '/').replace(/,/g, '');
 }
 
-async function generateTextWithGemini(statuses: string[], accountId: string): Promise<string | null> {
-  const MAX_RETRIES = 10;
-  let retryCount = 0;
-  ensureHistoryFile(accountId);
-  while (retryCount < MAX_RETRIES) {
-    try {
-      console.log('Geminiを使用して文章を生成します...');
-      const statusesText = JSON.stringify(statuses);
-      const model = new ChatGoogleGenerativeAI({
+function createLLMModel(): BaseChatModel {
+  switch (LLM_PROVIDER) {
+    case 'gemini':
+      console.log('Geminiモデルを初期化します...');
+      return new ChatGoogleGenerativeAI({
         model: GEMINI_MODEL,
         apiKey: GEMINI_API_KEY,
         temperature: 0.7
       });
+    case 'lmstudio':
+      console.log('LM Studioモデルを初期化します...');
+      return new ChatOpenAI({
+        model: LM_STUDIO_MODEL,
+        openAIApiKey: LM_STUDIO_API_KEY,
+        configuration: {
+          baseURL: LM_STUDIO_BASE_URL
+        },
+        temperature: 0.7
+      });
+    case 'groq':
+      console.log('Groqモデルを初期化します...');
+      return new ChatGroq({
+        model: GROQ_MODEL,
+        apiKey: GROQ_API_KEY,
+        temperature: 0.7
+      });
+    default:
+      throw new Error(`サポートされていないLLMプロバイダーです: ${LLM_PROVIDER}`);
+  }
+}
+
+async function generateTextWithLLM(statuses: string[], accountId: string): Promise<string | null> {
+  const MAX_RETRIES = 10;
+  let retryCount = 0;
+  ensureHistoryFile(accountId);
+  
+  while (retryCount < MAX_RETRIES) {
+    try {
+      console.log(`${LLM_PROVIDER.toUpperCase()}を使用して文章を生成します...`);
+      const statusesText = JSON.stringify(statuses);
+      const model = createLLMModel();
       const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
+      
       console.log(prompt);
       const result = await model.invoke([{ role: 'user', content: prompt }]);
       let generatedText = result.content.toString().trim();
@@ -359,12 +420,19 @@ async function generateTextWithGemini(statuses: string[], accountId: string): Pr
       generatedText = `${generatedText} #bot`;
       return generatedText;
     } catch (error: unknown) {
-      if (error instanceof Error && error.message && error.message.includes('RECITATION') && retryCount < MAX_RETRIES - 1) {
+      // Gemini特有のRECITATIONエラーとその他のエラーを区別
+      const isRecitationError = error instanceof Error && 
+        error.message && 
+        error.message.includes('RECITATION') && 
+        LLM_PROVIDER === 'gemini';
+      
+      if (isRecitationError && retryCount < MAX_RETRIES - 1) {
         retryCount++;
         console.log(`RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
+      
       console.error('文章生成中にエラーが発生しました:', error);
       return null;
     }
@@ -402,7 +470,7 @@ export async function runMain(): Promise<void> {
     const sampleSize = Math.min(statuses.length, RANDOM_SAMPLE_SIZE);
     const randomStatuses = getRandomSample(statuses, sampleSize);
     console.log(`${statuses.length}件の投稿からランダムに${randomStatuses.length}件を抽出しました`);
-    const generatedText = await generateTextWithGemini(randomStatuses, accountId);
+    const generatedText = await generateTextWithLLM(randomStatuses, accountId);
     if (generatedText) {
       console.log('\n===== 生成された文章 =====\n');
       console.log(generatedText);

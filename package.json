@@ -1,7 +1,7 @@
 {
-  "name": "mastodon-gemini-bot",
-  "version": "1.0.0",
-  "description": "Mastodonアカウントの投稿履歴を取得し、Google Gemini AIを使って新しい投稿文を生成するツール",
+  "name": "mastodon-ai-bot",
+  "version": "1.1.0",
+  "description": "Mastodonアカウントの投稿履歴を取得し、AI（Gemini/Groq/LM Studio）を使って新しい投稿文を生成するツール",
   "main": "index.ts",
   "scripts": {
     "start": "tsx index.ts",
@@ -11,13 +11,19 @@
   "keywords": [
     "mastodon",
     "gemini",
+    "groq",
+    "lm-studio",
+    "llm",
     "ai",
-    "bot"
+    "bot",
+    "langchain"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@langchain/google-genai": "^0.2.12",
+    "@langchain/groq": "^0.1.2",
+    "@langchain/openai": "^0.5.15",
     "dotenv": "^16.4.5",
     "langchain": "^0.3.28",
     "megalodon": "^10.1.1",
