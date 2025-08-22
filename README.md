@@ -22,6 +22,7 @@ Google Gemini AIとローカルLLM（LM Studio）の両方に対応していま�
 - 使用するAIモデルを環境変数で柔軟に設定可能
 - 指定した時間間隔で定期実行可能（node-cronによる内部スケジューリング）
 - Docker Composeで簡単に実行が可能
+- **2-pass LLMモード**: ユーザー模倣とペルソナ適用を分離した高精度な生成
 
 ## 準備
 
@@ -57,6 +58,10 @@ Google Gemini AIとローカルLLM（LM Studio）の両方に対応していま�
    LM_STUDIO_BASE_URL=http://localhost:1234/v1  # LM StudioのAPIエンドポイント
    LM_STUDIO_MODEL=your-local-model-name        # ロードしたモデル名
    LM_STUDIO_API_KEY=lm-studio                  # APIキー（通常は"lm-studio"で固定）
+
+   # 2-pass LLM設定
+   TWO_PASS_MODE=false                          # 2-passモードの有効/無効 (true/false)
+   TWO_PASS_LLM_PROVIDER=                       # 2pass目のLLMプロバイダー（省略時は1pass目と同じ）
 
    # 定期実行設定
    CRON_SCHEDULE=0,20,40 * * * *                 # cron形式で実行間隔を指定（例: 毎時0分から20分ごとに実行）
@@ -143,6 +148,27 @@ Groq APIキーは[Groq Console](https://console.groq.com/)から取得できま�
 - `BOT_POST_ENABLED=false`: 投稿機能を無効化（生成したテキストはコンソールにのみ表示）
 
 投稿元アカウントと投稿先Botアカウントは別々に管理できるため、異なるインスタンスにそれぞれを設定することも可能です。
+
+### 2-pass LLMモード
+
+2-pass LLMモードは、より高精度な投稿生成を実現するための機能です：
+
+**動作原理：**
+1. **1pass目**: `.systemprompt`を使用してユーザーの投稿を模倣
+2. **2pass目**: `.systemprompt2`を使用して1pass目の結果にペルソナを適用
+
+**設定方法：**
+- `TWO_PASS_MODE=true`: 2-passモードを有効化
+- `TWO_PASS_LLM_PROVIDER`: 2pass目で使用するLLMプロバイダー（省略時は1pass目と同じ）
+
+**利点：**
+- ユーザーの文体模倣とペルソナ適用を分離することで、より自然な文章生成が可能
+- それぞれのパスで独立したLLM呼び出しを行うため、メッセージ履歴の影響を排除
+- 異なるLLMプロバイダーを組み合わせることも可能（例：1pass目にGroq、2pass目にGemini）
+
+**カスタマイズ：**
+- `.systemprompt`: 1pass目のプロンプト（ユーザー模倣用）
+- `.systemprompt2`: 2pass目のプロンプト（ペルソナ適用用）
 
 ### 定期実行の設定
 

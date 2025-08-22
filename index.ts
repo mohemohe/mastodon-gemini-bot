@@ -37,6 +37,10 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 // 履歴の保持件数
 const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
 
+// 2-pass LLM設定
+const TWO_PASS_MODE = (process.env.TWO_PASS_MODE || 'false').toLowerCase() === 'true';
+const TWO_PASS_LLM_PROVIDER = process.env.TWO_PASS_LLM_PROVIDER || '';
+
 // アカウントIDキャッシュファイルのパス
 const CACHE_DIR = path.join(__dirname, 'cache');
 
@@ -356,6 +360,15 @@ function getSystemPrompt(): string {
   return prompt;
 }
 
+function getSystemPrompt2(): string {
+  const promptPath = path.join(__dirname, '.systemprompt2');
+  if (!fs.existsSync(promptPath)) {
+    return '';
+  }
+  const prompt = fs.readFileSync(promptPath, 'utf8');
+  return prompt;
+}
+
 function getFormattedDateTime(): string {
   const now = new Date();
   return now.toLocaleString('ja-JP', {
@@ -400,25 +413,100 @@ function createLLMModel(): BaseChatModel {
   }
 }
 
+function createLLMModelForSecondPass(): BaseChatModel {
+  const provider = TWO_PASS_LLM_PROVIDER || LLM_PROVIDER;
+  switch (provider) {
+    case 'gemini':
+      console.log('2pass目: Geminiモデルを初期化します...');
+      return new ChatGoogleGenerativeAI({
+        model: GEMINI_MODEL,
+        apiKey: GEMINI_API_KEY,
+        temperature: 0.7
+      });
+    case 'lmstudio':
+      console.log('2pass目: LM Studioモデルを初期化します...');
+      return new ChatOpenAI({
+        model: LM_STUDIO_MODEL,
+        openAIApiKey: LM_STUDIO_API_KEY,
+        configuration: {
+          baseURL: LM_STUDIO_BASE_URL
+        },
+        temperature: 0.7
+      });
+    case 'groq':
+      console.log('2pass目: Groqモデルを初期化します...');
+      return new ChatGroq({
+        model: GROQ_MODEL,
+        apiKey: GROQ_API_KEY,
+        temperature: 0.7
+      });
+    default:
+      throw new Error(`サポートされていないLLMプロバイダーです: ${provider}`);
+  }
+}
+
+async function generateSecondPassText(firstPassText: string): Promise<string | null> {
+  const MAX_RETRIES = 10;
+  let retryCount = 0;
+  
+  const systemPrompt2 = getSystemPrompt2();
+  if (!systemPrompt2) {
+    console.log('2pass目のシステムプロンプトが見つかりません。1pass目の結果を使用します。');
+    return firstPassText;
+  }
+  
+  while (retryCount < MAX_RETRIES) {
+    try {
+      console.log('2pass目: 1pass目の出力文をさらに処理します...');
+      const model = createLLMModelForSecondPass();
+      
+      const result = await model.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
+      let generatedText = result.content.toString().trim();
+      generatedText = generatedText.replace(/[\r\n]+$/, '');
+      return generatedText;
+    } catch (error: unknown) {
+      // Gemini特有のRECITATIONエラーとその他のエラーを区別
+      const isRecitationError = error instanceof Error && 
+        error.message && 
+        error.message.includes('RECITATION');
+      
+      if (isRecitationError && retryCount < MAX_RETRIES - 1) {
+        retryCount++;
+        console.log(`2pass目: RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+      
+      console.error('2pass目: 文章生成中にエラーが発生しました:', error);
+      return firstPassText; // エラー時は1pass目の結果を返す
+    }
+  }
+  console.error(`2pass目: 最大リトライ回数(${MAX_RETRIES}回)に達しました`);
+  return firstPassText; // エラー時は1pass目の結果を返す
+}
+
 async function generateTextWithLLM(statuses: string[], accountId: string): Promise<string | null> {
   const MAX_RETRIES = 10;
   let retryCount = 0;
   ensureHistoryFile(accountId);
   
+  // 1pass目の処理
+  let firstPassText: string | null = null;
   while (retryCount < MAX_RETRIES) {
     try {
-      console.log(`${LLM_PROVIDER.toUpperCase()}を使用して文章を生成します...`);
+      console.log(`1pass目: ${LLM_PROVIDER.toUpperCase()}を使用して文章を生成します...`);
       const statusesText = JSON.stringify(statuses);
       const model = createLLMModel();
       const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
       
       console.log(prompt);
       const result = await model.invoke([{ role: 'user', content: prompt }]);
-      let generatedText = result.content.toString().trim();
-      generatedText = generatedText.replace(/[\r\n]+$/, '');
-      saveHistory(generatedText, accountId);
-      generatedText = `${generatedText} #bot`;
-      return generatedText;
+      firstPassText = result.content.toString().trim();
+      firstPassText = firstPassText.replace(/[\r\n]+$/, '');
+      console.log('\n===== 生成された文章(1-pass) =====');
+      console.log(firstPassText);
+      console.log('===================================\n');
+      break;
     } catch (error: unknown) {
       // Gemini特有のRECITATIONエラーとその他のエラーを区別
       const isRecitationError = error instanceof Error && 
@@ -428,17 +516,33 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
       
       if (isRecitationError && retryCount < MAX_RETRIES - 1) {
         retryCount++;
-        console.log(`RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
+        console.log(`1pass目: RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
       
-      console.error('文章生成中にエラーが発生しました:', error);
+      console.error('1pass目: 文章生成中にエラーが発生しました:', error);
       return null;
     }
   }
-  console.error(`最大リトライ回数(${MAX_RETRIES}回)に達しました`);
-  return null;
+  
+  if (!firstPassText) {
+    console.error(`1pass目: 最大リトライ回数(${MAX_RETRIES}回)に達しました`);
+    return null;
+  }
+  
+  // 2pass目の処理（有効な場合）
+  let finalText = firstPassText;
+  if (TWO_PASS_MODE) {
+    const secondPassText = await generateSecondPassText(firstPassText);
+    if (secondPassText) {
+      finalText = secondPassText;
+    }
+  }
+  
+  saveHistory(finalText, accountId);
+  finalText = `${finalText} #bot`;
+  return finalText;
 }
 
 function getRandomSample<T>(array: T[], n: number): T[] {
@@ -472,9 +576,9 @@ export async function runMain(): Promise<void> {
     console.log(`${statuses.length}件の投稿からランダムに${randomStatuses.length}件を抽出しました`);
     const generatedText = await generateTextWithLLM(randomStatuses, accountId);
     if (generatedText) {
-      console.log('\n===== 生成された文章 =====\n');
+      console.log('\n===== 最終結果 =====');
       console.log(generatedText);
-      console.log('\n=========================\n');
+      console.log('====================\n');
       if (BOT_POST_ENABLED) {
         await postToBot(generatedText, botClient);
       }
