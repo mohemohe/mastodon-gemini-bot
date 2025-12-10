@@ -439,8 +439,7 @@ function createLLMModel(): BaseChatModel {
       return new ChatAnthropic({
         model: ANTHROPIC_MODEL,
         apiKey: ANTHROPIC_API_KEY,
-        ...(ANTHROPIC_BASE_URL && { anthropicApiUrl: ANTHROPIC_BASE_URL }),
-        temperature: 0.7
+        ...(ANTHROPIC_BASE_URL && { configuration: { baseURL: ANTHROPIC_BASE_URL } }),
       });
     case 'openai':
       console.log('OpenAIモデルを初期化します...');
@@ -487,8 +486,7 @@ function createLLMModelForSecondPass(): BaseChatModel {
       return new ChatAnthropic({
         model: ANTHROPIC_MODEL,
         apiKey: ANTHROPIC_API_KEY,
-        ...(ANTHROPIC_BASE_URL && { anthropicApiUrl: ANTHROPIC_BASE_URL }),
-        temperature: 0.7
+        ...(ANTHROPIC_BASE_URL && { configuration: { baseURL: ANTHROPIC_BASE_URL } }),
       });
     case 'openai':
       console.log('2pass目: OpenAIモデルを初期化します...');
