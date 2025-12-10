@@ -4,6 +4,7 @@ import type { MegalodonInterface } from 'megalodon';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ChatGroq } from '@langchain/groq';
 import { ChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,6 +35,16 @@ const LM_STUDIO_API_KEY = process.env.LM_STUDIO_API_KEY || 'lm-studio';
 // Groq APIの環境変数
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+
+// Anthropic APIの環境変数
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL || '';
+
+// OpenAI APIの環境変数
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || '';
 
 // 履歴の保持件数
 const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
@@ -69,7 +80,17 @@ function validateEnvVariables(): boolean {
     console.error('エラー: Groq プロバイダーを使用する場合、GROQ_API_KEYが必要です。');
     return false;
   }
-  
+
+  if (LLM_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) {
+    console.error('エラー: Anthropic プロバイダーを使用する場合、ANTHROPIC_API_KEYが必要です。');
+    return false;
+  }
+
+  if (LLM_PROVIDER === 'openai' && !OPENAI_API_KEY) {
+    console.error('エラー: OpenAI プロバイダーを使用する場合、OPENAI_API_KEYが必要です。');
+    return false;
+  }
+
   if (BOT_POST_ENABLED && (!BOT_BASE_URL || !BOT_ACCESS_TOKEN)) {
     console.error('エラー: 投稿機能を有効にするには、BOT_BASE_URLとBOT_ACCESS_TOKENが必要です。');
     return false;
@@ -413,6 +434,22 @@ function createLLMModel(): BaseChatModel {
         apiKey: GROQ_API_KEY,
         temperature: 0.7
       });
+    case 'anthropic':
+      console.log('Anthropicモデルを初期化します...');
+      return new ChatAnthropic({
+        model: ANTHROPIC_MODEL,
+        apiKey: ANTHROPIC_API_KEY,
+        ...(ANTHROPIC_BASE_URL && { anthropicApiUrl: ANTHROPIC_BASE_URL }),
+        temperature: 0.7
+      });
+    case 'openai':
+      console.log('OpenAIモデルを初期化します...');
+      return new ChatOpenAI({
+        model: OPENAI_MODEL,
+        openAIApiKey: OPENAI_API_KEY,
+        ...(OPENAI_BASE_URL && { configuration: { baseURL: OPENAI_BASE_URL } }),
+        temperature: 0.7
+      });
     default:
       throw new Error(`サポートされていないLLMプロバイダーです: ${LLM_PROVIDER}`);
   }
@@ -443,6 +480,22 @@ function createLLMModelForSecondPass(): BaseChatModel {
       return new ChatGroq({
         model: GROQ_MODEL,
         apiKey: GROQ_API_KEY,
+        temperature: 0.7
+      });
+    case 'anthropic':
+      console.log('2pass目: Anthropicモデルを初期化します...');
+      return new ChatAnthropic({
+        model: ANTHROPIC_MODEL,
+        apiKey: ANTHROPIC_API_KEY,
+        ...(ANTHROPIC_BASE_URL && { anthropicApiUrl: ANTHROPIC_BASE_URL }),
+        temperature: 0.7
+      });
+    case 'openai':
+      console.log('2pass目: OpenAIモデルを初期化します...');
+      return new ChatOpenAI({
+        model: OPENAI_MODEL,
+        openAIApiKey: OPENAI_API_KEY,
+        ...(OPENAI_BASE_URL && { configuration: { baseURL: OPENAI_BASE_URL } }),
         temperature: 0.7
       });
     default:
