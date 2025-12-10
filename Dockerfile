@@ -4,7 +4,8 @@ WORKDIR /app
 
 # パッケージ依存関係のコピーとインストール
 COPY package*.json ./
-RUN npm install
+COPY .npmrc ./
+RUN npm ci
 
 # アプリケーションコードのコピー
 COPY . .
