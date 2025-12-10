@@ -11,6 +11,7 @@ import path from 'node:path';
 // 投稿取得元の環境変数の取得と検証
 const SOURCE_BASE_URL = process.env.MASTODON_BASE_URL || '';
 const SOURCE_ACCESS_TOKEN = process.env.MASTODON_ACCESS_TOKEN || '';
+const SOURCE_USER_ID = process.env.MASTODON_USER_ID || '';
 const SOURCE_USERNAME = process.env.MASTODON_USERNAME || '';
 
 // 投稿先Botアカウントの環境変数
@@ -45,8 +46,12 @@ const TWO_PASS_LLM_PROVIDER = process.env.TWO_PASS_LLM_PROVIDER || '';
 const CACHE_DIR = path.join(__dirname, 'cache');
 
 function validateEnvVariables(): boolean {
-  if (!SOURCE_BASE_URL || !SOURCE_ACCESS_TOKEN || !SOURCE_USERNAME) {
-    console.error('エラー: 必要な環境変数が設定されていません。.envファイルを確認してください。');
+  if (!SOURCE_BASE_URL || !SOURCE_ACCESS_TOKEN) {
+    console.error('エラー: MASTODON_BASE_URLまたはMASTODON_ACCESS_TOKENが設定されていません。.envファイルを確認してください。');
+    return false;
+  }
+  if (!SOURCE_USER_ID && !SOURCE_USERNAME) {
+    console.error('エラー: MASTODON_USER_IDまたはMASTODON_USERNAMEのいずれかを設定してください。');
     return false;
   }
   
@@ -105,7 +110,7 @@ function extractPublicStatusTexts(statuses: Status[]): string[] {
   return statuses
     .filter(status => !status.reblog)
     .filter(status => !status.replies_count)
-    .filter(status => status.visibility === 'public')
+    .filter(status => status.visibility === 'public' || status.visibility === 'unlisted')
     .map(status => status.content.replace(/<[^>]*>/g, ''))
     .filter(text => !text.startsWith('@'))
     .filter(text => text.trim().length > 0);
@@ -503,9 +508,11 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
       const result = await model.invoke([{ role: 'user', content: prompt }]);
       firstPassText = result.content.toString().trim();
       firstPassText = firstPassText.replace(/[\r\n]+$/, '');
-      console.log('\n===== 生成された文章(1-pass) =====');
-      console.log(firstPassText);
-      console.log('===================================\n');
+      if (TWO_PASS_MODE) {
+        console.log('\n===== 生成された文章(1-pass) =====');
+        console.log(firstPassText);
+        console.log('===================================\n');
+      }
       break;
     } catch (error: unknown) {
       // Gemini特有のRECITATIONエラーとその他のエラーを区別
@@ -564,7 +571,13 @@ export async function runMain(): Promise<void> {
     }
     const sourceClient = initSourceClient();
     const botClient = initBotClient();
-    const accountId = await resolveAccountId(SOURCE_USERNAME, sourceClient);
+    let accountId: string;
+    if (SOURCE_USER_ID) {
+      console.log(`MASTODON_USER_IDが指定されています。アカウントID '${SOURCE_USER_ID}' を使用します`);
+      accountId = SOURCE_USER_ID;
+    } else {
+      accountId = await resolveAccountId(SOURCE_USERNAME, sourceClient);
+    }
     const statuses = await fetchAccountStatuses(accountId, sourceClient);
     if (statuses.length === 0) {
       console.log('投稿が見つかりませんでした。プログラムを終了します。');
