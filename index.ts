@@ -55,7 +55,7 @@ const TWO_PASS_MODE = (process.env.TWO_PASS_MODE || 'false').toLowerCase() === '
 const TWO_PASS_LLM_PROVIDER = process.env.TWO_PASS_LLM_PROVIDER || '';
 
 // Structured Outputs設定
-const USE_STRUCTURED_OUTPUTS = (process.env.USE_STRUCTURED_OUTPUTS || '0') === '1';
+const USE_STRUCTURED_OUTPUTS = (process.env.USE_STRUCTURED_OUTPUTS || 'false') === 'true';
 
 // アカウントIDキャッシュファイルのパス
 const CACHE_DIR = path.join(__dirname, 'cache');
