@@ -8,6 +8,7 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import fs from 'node:fs';
 import path from 'node:path';
+import { GeneratedTextSchema } from './structure';
 
 // 投稿取得元の環境変数の取得と検証
 const SOURCE_BASE_URL = process.env.MASTODON_BASE_URL || '';
@@ -52,6 +53,9 @@ const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
 // 2-pass LLM設定
 const TWO_PASS_MODE = (process.env.TWO_PASS_MODE || 'false').toLowerCase() === 'true';
 const TWO_PASS_LLM_PROVIDER = process.env.TWO_PASS_LLM_PROVIDER || '';
+
+// Structured Outputs設定
+const USE_STRUCTURED_OUTPUTS = (process.env.USE_STRUCTURED_OUTPUTS || '0') === '1';
 
 // アカウントIDキャッシュファイルのパス
 const CACHE_DIR = path.join(__dirname, 'cache');
@@ -515,9 +519,18 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
     try {
       console.log('2pass目: 1pass目の出力文をさらに処理します...');
       const model = createLLMModelForSecondPass();
-      
-      const result = await model.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
-      let generatedText = result.content.toString().trim();
+
+      let generatedText: string;
+      if (USE_STRUCTURED_OUTPUTS) {
+        console.log('Structured Outputsを使用して生成します...');
+        const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
+        const result = await structuredModel.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
+        generatedText = result.text.trim();
+      } else {
+        const result = await model.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
+        generatedText = result.content.toString().trim();
+      }
+
       generatedText = generatedText.replace(/[\r\n]+$/, '');
       return generatedText;
     } catch (error: unknown) {
@@ -554,10 +567,19 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
       const statusesText = JSON.stringify(statuses);
       const model = createLLMModel();
       const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
-      
+
       console.log(prompt);
-      const result = await model.invoke([{ role: 'user', content: prompt }]);
-      firstPassText = result.content.toString().trim();
+
+      if (USE_STRUCTURED_OUTPUTS) {
+        console.log('Structured Outputsを使用して生成します...');
+        const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
+        const result = await structuredModel.invoke([{ role: 'user', content: prompt }]);
+        firstPassText = result.generated_text.trim();
+      } else {
+        const result = await model.invoke([{ role: 'user', content: prompt }]);
+        firstPassText = result.content.toString().trim();
+      }
+
       firstPassText = firstPassText.replace(/[\r\n]+$/, '');
       if (TWO_PASS_MODE) {
         console.log('\n===== 生成された文章(1-pass) =====');
