@@ -588,15 +588,9 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
       }
       break;
     } catch (error: unknown) {
-      // Gemini特有のRECITATIONエラーとその他のエラーを区別
-      const isRecitationError = error instanceof Error && 
-        error.message && 
-        error.message.includes('RECITATION') && 
-        LLM_PROVIDER === 'gemini';
-      
-      if (isRecitationError && retryCount < MAX_RETRIES - 1) {
+      if (retryCount < MAX_RETRIES - 1) {
         retryCount++;
-        console.log(`1pass目: RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
+        console.log(`1pass目: 文章生成中にエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES}):`, error);
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
