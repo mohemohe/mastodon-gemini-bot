@@ -23,6 +23,7 @@ const BOT_POST_ENABLED = (process.env.BOT_POST_ENABLED || 'false').toLowerCase()
 
 // LLM プロバイダーの設定
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
+const FALLBACK_LLM_PROVIDER = process.env.FALLBACK_LLM_PROVIDER ? process.env.FALLBACK_LLM_PROVIDER.toLowerCase() : '';
 
 // Gemini APIの環境変数
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -412,8 +413,8 @@ function getFormattedDateTime(): string {
   }).replace(/\//g, '/').replace(/,/g, '');
 }
 
-function createLLMModel(): BaseChatModel {
-  switch (LLM_PROVIDER) {
+function createLLMModel(provider: string = LLM_PROVIDER): BaseChatModel {
+  switch (provider) {
     case 'gemini':
       console.log('Geminiモデルを初期化します...');
       return new ChatGoogleGenerativeAI({
@@ -454,53 +455,6 @@ function createLLMModel(): BaseChatModel {
         temperature: 0.7
       });
     default:
-      throw new Error(`サポートされていないLLMプロバイダーです: ${LLM_PROVIDER}`);
-  }
-}
-
-function createLLMModelForSecondPass(): BaseChatModel {
-  const provider = TWO_PASS_LLM_PROVIDER || LLM_PROVIDER;
-  switch (provider) {
-    case 'gemini':
-      console.log('2pass目: Geminiモデルを初期化します...');
-      return new ChatGoogleGenerativeAI({
-        model: GEMINI_MODEL,
-        apiKey: GEMINI_API_KEY,
-        temperature: 0.7
-      });
-    case 'lmstudio':
-      console.log('2pass目: LM Studioモデルを初期化します...');
-      return new ChatOpenAI({
-        model: LM_STUDIO_MODEL,
-        openAIApiKey: LM_STUDIO_API_KEY,
-        configuration: {
-          baseURL: LM_STUDIO_BASE_URL
-        },
-        temperature: 0.7
-      });
-    case 'groq':
-      console.log('2pass目: Groqモデルを初期化します...');
-      return new ChatGroq({
-        model: GROQ_MODEL,
-        apiKey: GROQ_API_KEY,
-        temperature: 0.7
-      });
-    case 'anthropic':
-      console.log('2pass目: Anthropicモデルを初期化します...');
-      return new ChatAnthropic({
-        model: ANTHROPIC_MODEL,
-        apiKey: ANTHROPIC_API_KEY,
-        ...(ANTHROPIC_BASE_URL && { configuration: { baseURL: ANTHROPIC_BASE_URL } }),
-      });
-    case 'openai':
-      console.log('2pass目: OpenAIモデルを初期化します...');
-      return new ChatOpenAI({
-        model: OPENAI_MODEL,
-        openAIApiKey: OPENAI_API_KEY,
-        ...(OPENAI_BASE_URL && { configuration: { baseURL: OPENAI_BASE_URL } }),
-        temperature: 0.7
-      });
-    default:
       throw new Error(`サポートされていないLLMプロバイダーです: ${provider}`);
   }
 }
@@ -508,24 +462,25 @@ function createLLMModelForSecondPass(): BaseChatModel {
 async function generateSecondPassText(firstPassText: string): Promise<string | null> {
   const MAX_RETRIES = 10;
   let retryCount = 0;
-  
+  let currentProvider = TWO_PASS_LLM_PROVIDER || LLM_PROVIDER;
+
   const systemPrompt2 = getSystemPrompt2();
   if (!systemPrompt2) {
     console.log('2pass目のシステムプロンプトが見つかりません。1pass目の結果を使用します。');
     return firstPassText;
   }
-  
+
   while (retryCount < MAX_RETRIES) {
     try {
-      console.log('2pass目: 1pass目の出力文をさらに処理します...');
-      const model = createLLMModelForSecondPass();
+      console.log(`2pass目: ${currentProvider.toUpperCase()}を使用して1pass目の出力文をさらに処理します...`);
+      const model = createLLMModel(currentProvider);
 
       let generatedText: string;
       if (USE_STRUCTURED_OUTPUTS) {
         console.log('Structured Outputsを使用して生成します...');
         const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
         const result = await structuredModel.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
-        generatedText = result.text.trim();
+        generatedText = result.generated_text.trim();
       } else {
         const result = await model.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
         generatedText = result.content.toString().trim();
@@ -535,18 +490,34 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
       return generatedText;
     } catch (error: unknown) {
       // Gemini特有のRECITATIONエラーとその他のエラーを区別
-      const isRecitationError = error instanceof Error && 
-        error.message && 
+      const isRecitationError = error instanceof Error &&
+        error.message &&
         error.message.includes('RECITATION');
-      
+
       if (isRecitationError && retryCount < MAX_RETRIES - 1) {
         retryCount++;
         console.log(`2pass目: RECITATIONエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES})`);
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
-      
+
+      if (retryCount < MAX_RETRIES - 1) {
+        retryCount++;
+        console.log(`2pass目: 文章生成中にエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES}):`, error);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
       console.error('2pass目: 文章生成中にエラーが発生しました:', error);
+
+      // 最大リトライ回数に達した場合、フォールバックプロバイダーを試す
+      if (FALLBACK_LLM_PROVIDER && currentProvider !== FALLBACK_LLM_PROVIDER) {
+        console.log(`\n最大リトライ回数に達しました。フォールバックプロバイダー ${FALLBACK_LLM_PROVIDER.toUpperCase()} に切り替えます...\n`);
+        currentProvider = FALLBACK_LLM_PROVIDER;
+        retryCount = 0;
+        continue;
+      }
+
       return firstPassText; // エラー時は1pass目の結果を返す
     }
   }
@@ -557,15 +528,16 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
 async function generateTextWithLLM(statuses: string[], accountId: string): Promise<string | null> {
   const MAX_RETRIES = 10;
   let retryCount = 0;
+  let currentProvider = LLM_PROVIDER;
   ensureHistoryFile(accountId);
-  
+
   // 1pass目の処理
   let firstPassText: string | null = null;
   while (retryCount < MAX_RETRIES) {
     try {
-      console.log(`1pass目: ${LLM_PROVIDER.toUpperCase()}を使用して文章を生成します...`);
+      console.log(`1pass目: ${currentProvider.toUpperCase()}を使用して文章を生成します...`);
       const statusesText = JSON.stringify(statuses);
-      const model = createLLMModel();
+      const model = createLLMModel(currentProvider);
       const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
 
       console.log(prompt);
@@ -594,12 +566,21 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
-      
+
       console.error('1pass目: 文章生成中にエラーが発生しました:', error);
+
+      // 最大リトライ回数に達した場合、フォールバックプロバイダーを試す
+      if (FALLBACK_LLM_PROVIDER && currentProvider !== FALLBACK_LLM_PROVIDER) {
+        console.log(`\n最大リトライ回数に達しました。フォールバックプロバイダー ${FALLBACK_LLM_PROVIDER.toUpperCase()} に切り替えます...\n`);
+        currentProvider = FALLBACK_LLM_PROVIDER;
+        retryCount = 0;
+        continue;
+      }
+
       return null;
     }
   }
-  
+
   if (!firstPassText) {
     console.error(`1pass目: 最大リトライ回数(${MAX_RETRIES}回)に達しました`);
     return null;
