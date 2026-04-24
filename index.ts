@@ -58,6 +58,9 @@ const TWO_PASS_LLM_PROVIDER = process.env.TWO_PASS_LLM_PROVIDER || '';
 // Structured Outputs設定
 const USE_STRUCTURED_OUTPUTS = (process.env.USE_STRUCTURED_OUTPUTS || 'false') === 'true';
 
+// DEBUG設定: 1のときStructured Outputを無視しストリーミング出力する
+const DEBUG = process.env.DEBUG === '1';
+
 // アカウントIDキャッシュファイルのパス
 const CACHE_DIR = path.join(__dirname, 'cache');
 
@@ -247,12 +250,12 @@ async function fetchLatestStatusId(accountId: string, sourceClient: MegalodonInt
   }
 }
 
-async function fetchNewStatuses(accountId: string, since_id: string, sourceClient: MegalodonInterface): Promise<string[]> {
+async function fetchNewStatuses(accountId: string, since_id: string, sourceClient: MegalodonInterface, maxStatuses: number): Promise<string[]> {
   console.log(`ID: ${since_id} より新しい投稿を取得します...`);
   let allNewStatuses: string[] = [];
   let maxId: string | null = null;
   const limit = 40;
-  while (true) {
+  while (allNewStatuses.length < maxStatuses) {
     try {
       const options: Record<string, unknown> = {
         limit: limit,
@@ -274,6 +277,9 @@ async function fetchNewStatuses(accountId: string, since_id: string, sourceClien
       console.error('投稿の取得中にエラーが発生しました:', error);
       break;
     }
+  }
+  if (allNewStatuses.length >= maxStatuses) {
+    console.log(`MAX_STATUSES(${maxStatuses})に達したため、新しい投稿の取得を終了します`);
   }
   return allNewStatuses;
 }
@@ -324,7 +330,7 @@ async function fetchAccountStatuses(accountId: string, sourceClient: MegalodonIn
       }
     } else {
       console.log('新しい投稿が見つかりました。キャッシュを更新します');
-      const newStatuses = await fetchNewStatuses(accountId, cachedLatestId as string, sourceClient);
+      const newStatuses = await fetchNewStatuses(accountId, cachedLatestId as string, sourceClient, maxStatuses);
       allStatuses = newStatuses.concat(allStatuses);
       console.log(`${newStatuses.length}件の新しい投稿を追加しました`);
     }
@@ -476,7 +482,21 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
       const model = createLLMModel(currentProvider);
 
       let generatedText: string;
-      if (USE_STRUCTURED_OUTPUTS) {
+      if (DEBUG) {
+        const messages = [{ role: 'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }];
+        const startTime = new Date();
+        console.log(`\n===== 2pass目 ストリーミング開始: ${startTime.toISOString()} =====`);
+        const stream = await model.stream(messages);
+        let streamedText = '';
+        for await (const chunk of stream) {
+          const text = chunk.text ?? '';
+          process.stdout.write(text);
+          streamedText += text;
+        }
+        const endTime = new Date();
+        console.log(`\n===== 2pass目 ストリーミング終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
+        generatedText = streamedText.trim();
+      } else if (USE_STRUCTURED_OUTPUTS) {
         console.log('Structured Outputsを使用して生成します...');
         const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
         const result = await structuredModel.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
@@ -542,7 +562,20 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
 
       console.log(prompt);
 
-      if (USE_STRUCTURED_OUTPUTS) {
+      if (DEBUG) {
+        const startTime = new Date();
+        console.log(`\n===== 1pass目 ストリーミング開始: ${startTime.toISOString()} =====`);
+        const stream = await model.stream([{ role: 'user', content: prompt }]);
+        let streamedText = '';
+        for await (const chunk of stream) {
+          const text = chunk.text ?? '';
+          process.stdout.write(text);
+          streamedText += text;
+        }
+        const endTime = new Date();
+        console.log(`\n===== 1pass目 ストリーミング終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
+        firstPassText = streamedText.trim();
+      } else if (USE_STRUCTURED_OUTPUTS) {
         console.log('Structured Outputsを使用して生成します...');
         const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
         const result = await structuredModel.invoke([{ role: 'user', content: prompt }]);
