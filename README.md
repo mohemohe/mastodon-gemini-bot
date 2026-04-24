@@ -1,7 +1,7 @@
 # Mastodon AI Bot
 
 Mastodonアカウントの投稿履歴を取得し、AIを使って新しい投稿文を生成するツールです。  
-Google Gemini AIとローカルLLM（LM Studio）の両方に対応しています。
+[Vercel AI SDK](https://ai-sdk.dev/) をベースに、Google Gemini、Groq、OpenAI、Anthropic、LM Studio など複数のLLMプロバイダーに対応しています。
 
 ※ 人間注: このbotは Cursor と Claude 3.7 Sonnet, Claude 4 Sonnet, Claude 4 Opus のどれかによって全てのコードが生成されています。
 
@@ -11,10 +11,13 @@ Google Gemini AIとローカルLLM（LM Studio）の両方に対応していま�
 - 公開投稿（public）のみを対象とし、非公開や限定公開の投稿は除外
 - 投稿データをローカルにJSONとしてキャッシュし、効率的に再利用
 - 新しい投稿があった場合のみAPIからデータを取得して更新
-- **複数のAIプロバイダーに対応**:
+- **複数のAIプロバイダーに対応（Vercel AI SDK経由）**:
   - Google Gemini AI（クラウド）
   - Groq（高速推論、クラウド）
+  - OpenAI（クラウド / OpenAI互換エンドポイント対応）
+  - Anthropic Claude（クラウド / カスタムbaseURL対応）
   - LM Studio（ローカルLLM、プライバシー重視）
+  - `providers.ts` にエントリを追加するだけで新しいプロバイダーを容易に追加可能
 - そのアカウントの文体や内容を模倣した新しい投稿を生成
 - 生成結果をコンソールに表示
 - 別のBotアカウントを使用して生成した文章を自動投稿
@@ -44,7 +47,7 @@ Google Gemini AIとローカルLLM（LM Studio）の両方に対応していま�
    BOT_POST_ENABLED=true                   # 投稿機能の有効/無効 (true/false)
 
    # AIプロバイダー選択
-   LLM_PROVIDER=gemini                     # "gemini"、"groq"、または "lmstudio" を選択
+   LLM_PROVIDER=gemini                     # "gemini" / "groq" / "openai" / "anthropic" / "lmstudio" から選択
 
    # Google Gemini設定（LLM_PROVIDER=geminiの場合）
    GEMINI_API_KEY=your_gemini_api_key      # Google Gemini APIキー
@@ -53,6 +56,17 @@ Google Gemini AIとローカルLLM（LM Studio）の両方に対応していま�
    # Groq設定（LLM_PROVIDER=groqの場合）
    GROQ_API_KEY=your_groq_api_key               # Groq APIキー
    GROQ_MODEL=llama-3.3-70b-versatile          # 使用するGroqモデル（デフォルト: llama-3.3-70b-versatile）
+
+   # OpenAI設定（LLM_PROVIDER=openaiの場合）
+   OPENAI_API_KEY=your_openai_api_key           # OpenAI APIキー
+   OPENAI_MODEL=gpt-4o                          # 使用するモデル（デフォルト: gpt-4o）
+   OPENAI_BASE_URL=                             # 任意。OpenAI互換APIを使用する場合に設定
+   OPENAI_USE_RESPONSES_API=false               # true の場合 Responses API（/v1/responses）、デフォルトは Chat Completions API（/v1/chat/completions）
+
+   # Anthropic設定（LLM_PROVIDER=anthropicの場合）
+   ANTHROPIC_API_KEY=your_anthropic_api_key     # Anthropic APIキー
+   ANTHROPIC_MODEL=claude-sonnet-4-20250514     # 使用するモデル
+   ANTHROPIC_BASE_URL=                          # 任意。プロキシ経由で利用する場合に設定
 
    # LM Studio設定（LLM_PROVIDER=lmstudioの場合）
    LM_STUDIO_BASE_URL=http://localhost:1234/v1  # LM StudioのAPIエンドポイント
@@ -91,7 +105,31 @@ Google Gemini AIとローカルLLM（LM Studio）の両方に対応していま�
 
 - `gemini`: Google Gemini AI（クラウドベース、APIキー必要）
 - `groq`: Groq（高速推論に特化したクラウドベース、APIキー必要）
+- `openai`: OpenAI（クラウドベース、APIキー必要。`OPENAI_BASE_URL`でOpenAI互換APIにも対応）
+- `anthropic`: Anthropic Claude（クラウドベース、APIキー必要。`ANTHROPIC_BASE_URL`でプロキシ利用可能）
 - `lmstudio`: LM Studio（ローカルLLM、プライバシー重視）
+
+### 新しいプロバイダーの追加
+
+Vercel AI SDK に対応したプロバイダーであれば、`providers.ts` に数行追加するだけで対応できます：
+
+```typescript
+// providers.ts
+export const providerRegistry: Record<string, LLMProviderFactory> = {
+  // ...既存のプロバイダー
+  mistral: () => {
+    const apiKey = process.env.MISTRAL_API_KEY;
+    if (!apiKey) throw new Error('MISTRAL_API_KEYが必要です');
+    const mistral = createMistral({ apiKey });
+    return {
+      model: mistral(process.env.MISTRAL_MODEL || 'mistral-large-latest'),
+      temperature: 0.7,
+    };
+  },
+};
+```
+
+登録したキー（例: `mistral`）をそのまま `LLM_PROVIDER` に指定できます。
 
 ### Geminiモデルの設定
 

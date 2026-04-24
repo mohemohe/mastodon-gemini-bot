@@ -1,14 +1,11 @@
 import 'dotenv/config';
 import generator from 'megalodon';
 import type { MegalodonInterface } from 'megalodon';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
-import { ChatGroq } from '@langchain/groq';
-import { ChatOpenAI } from '@langchain/openai';
-import { ChatAnthropic } from '@langchain/anthropic';
-import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { generateText, streamText, Output, type ModelMessage } from 'ai';
 import fs from 'node:fs';
 import path from 'node:path';
 import { GeneratedTextSchema } from './structure';
+import { createLLMProvider, getSupportedProviders } from './providers';
 
 // 投稿取得元の環境変数の取得と検証
 const SOURCE_BASE_URL = process.env.MASTODON_BASE_URL || '';
@@ -24,29 +21,6 @@ const BOT_POST_ENABLED = (process.env.BOT_POST_ENABLED || 'false').toLowerCase()
 // LLM プロバイダーの設定
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'gemini').toLowerCase();
 const FALLBACK_LLM_PROVIDER = process.env.FALLBACK_LLM_PROVIDER ? process.env.FALLBACK_LLM_PROVIDER.toLowerCase() : '';
-
-// Gemini APIの環境変数
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-
-// LM Studio APIの環境変数
-const LM_STUDIO_BASE_URL = process.env.LM_STUDIO_BASE_URL || 'http://localhost:1234/v1';
-const LM_STUDIO_MODEL = process.env.LM_STUDIO_MODEL || 'local-model';
-const LM_STUDIO_API_KEY = process.env.LM_STUDIO_API_KEY || 'lm-studio';
-
-// Groq APIの環境変数
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-
-// Anthropic APIの環境変数
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
-const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL || '';
-
-// OpenAI APIの環境変数
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || '';
 
 // 履歴の保持件数
 const HISTORY_LIMIT = Number.parseInt(process.env.HISTORY_LIMIT || '5', 10);
@@ -73,29 +47,20 @@ function validateEnvVariables(): boolean {
     console.error('エラー: MASTODON_USER_IDまたはMASTODON_USERNAMEのいずれかを設定してください。');
     return false;
   }
-  
-  if (LLM_PROVIDER === 'gemini' && !GEMINI_API_KEY) {
-    console.error('エラー: Gemini プロバイダーを使用する場合、GEMINI_API_KEYが必要です。');
-    return false;
-  }
-  
-  if (LLM_PROVIDER === 'lmstudio' && !LM_STUDIO_BASE_URL) {
-    console.error('エラー: LM Studio プロバイダーを使用する場合、LM_STUDIO_BASE_URLが必要です。');
-    return false;
-  }
-  
-  if (LLM_PROVIDER === 'groq' && !GROQ_API_KEY) {
-    console.error('エラー: Groq プロバイダーを使用する場合、GROQ_API_KEYが必要です。');
+
+  const supported = getSupportedProviders();
+  if (!supported.includes(LLM_PROVIDER)) {
+    console.error(`エラー: サポートされていないLLM_PROVIDERです: ${LLM_PROVIDER}。対応プロバイダー: ${supported.join(', ')}`);
     return false;
   }
 
-  if (LLM_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) {
-    console.error('エラー: Anthropic プロバイダーを使用する場合、ANTHROPIC_API_KEYが必要です。');
+  if (FALLBACK_LLM_PROVIDER && !supported.includes(FALLBACK_LLM_PROVIDER)) {
+    console.error(`エラー: サポートされていないFALLBACK_LLM_PROVIDERです: ${FALLBACK_LLM_PROVIDER}。対応プロバイダー: ${supported.join(', ')}`);
     return false;
   }
 
-  if (LLM_PROVIDER === 'openai' && !OPENAI_API_KEY) {
-    console.error('エラー: OpenAI プロバイダーを使用する場合、OPENAI_API_KEYが必要です。');
+  if (TWO_PASS_LLM_PROVIDER && !supported.includes(TWO_PASS_LLM_PROVIDER)) {
+    console.error(`エラー: サポートされていないTWO_PASS_LLM_PROVIDERです: ${TWO_PASS_LLM_PROVIDER}。対応プロバイダー: ${supported.join(', ')}`);
     return false;
   }
 
@@ -103,7 +68,7 @@ function validateEnvVariables(): boolean {
     console.error('エラー: 投稿機能を有効にするには、BOT_BASE_URLとBOT_ACCESS_TOKENが必要です。');
     return false;
   }
-  
+
   return true;
 }
 
@@ -419,50 +384,41 @@ function getFormattedDateTime(): string {
   }).replace(/\//g, '/').replace(/,/g, '');
 }
 
-function createLLMModel(provider: string = LLM_PROVIDER): BaseChatModel {
-  switch (provider) {
-    case 'gemini':
-      console.log('Geminiモデルを初期化します...');
-      return new ChatGoogleGenerativeAI({
-        model: GEMINI_MODEL,
-        apiKey: GEMINI_API_KEY,
-        temperature: 0.7
-      });
-    case 'lmstudio':
-      console.log('LM Studioモデルを初期化します...');
-      return new ChatOpenAI({
-        model: LM_STUDIO_MODEL,
-        openAIApiKey: LM_STUDIO_API_KEY,
-        configuration: {
-          baseURL: LM_STUDIO_BASE_URL
-        },
-        temperature: 0.7
-      });
-    case 'groq':
-      console.log('Groqモデルを初期化します...');
-      return new ChatGroq({
-        model: GROQ_MODEL,
-        apiKey: GROQ_API_KEY,
-        temperature: 0.7
-      });
-    case 'anthropic':
-      console.log('Anthropicモデルを初期化します...');
-      return new ChatAnthropic({
-        model: ANTHROPIC_MODEL,
-        apiKey: ANTHROPIC_API_KEY,
-        ...(ANTHROPIC_BASE_URL && { configuration: { baseURL: ANTHROPIC_BASE_URL } }),
-      });
-    case 'openai':
-      console.log('OpenAIモデルを初期化します...');
-      return new ChatOpenAI({
-        model: OPENAI_MODEL,
-        openAIApiKey: OPENAI_API_KEY,
-        ...(OPENAI_BASE_URL && { configuration: { baseURL: OPENAI_BASE_URL } }),
-        temperature: 0.7
-      });
-    default:
-      throw new Error(`サポートされていないLLMプロバイダーです: ${provider}`);
+async function invokeLLM(provider: string, messages: ModelMessage[]): Promise<string> {
+  const { model, temperature } = createLLMProvider(provider);
+  const commonOptions = temperature !== undefined ? { temperature } : {};
+
+  if (DEBUG) {
+    const result = streamText({
+      model,
+      messages,
+      ...commonOptions,
+    });
+    let streamedText = '';
+    for await (const textPart of result.textStream) {
+      process.stdout.write(textPart);
+      streamedText += textPart;
+    }
+    return streamedText.trim();
   }
+
+  if (USE_STRUCTURED_OUTPUTS) {
+    console.log('Structured Outputsを使用して生成します...');
+    const result = await generateText({
+      model,
+      messages,
+      output: Output.object({ schema: GeneratedTextSchema }),
+      ...commonOptions,
+    });
+    return result.output.generated_text.trim();
+  }
+
+  const result = await generateText({
+    model,
+    messages,
+    ...commonOptions,
+  });
+  return result.text.trim();
 }
 
 async function generateSecondPassText(firstPassText: string): Promise<string | null> {
@@ -479,30 +435,14 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
   while (retryCount < MAX_RETRIES) {
     try {
       console.log(`2pass目: ${currentProvider.toUpperCase()}を使用して1pass目の出力文をさらに処理します...`);
-      const model = createLLMModel(currentProvider);
+      const messages: ModelMessage[] = [
+        { role: 'system', content: systemPrompt2 },
+        { role: 'user', content: firstPassText },
+      ];
 
-      let generatedText: string;
       const startTime = new Date();
       console.log(`\n===== 2pass目 生成開始: ${startTime.toISOString()} =====`);
-      if (DEBUG) {
-        const messages = [{ role: 'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }];
-        const stream = await model.stream(messages);
-        let streamedText = '';
-        for await (const chunk of stream) {
-          const text = chunk.text ?? '';
-          process.stdout.write(text);
-          streamedText += text;
-        }
-        generatedText = streamedText.trim();
-      } else if (USE_STRUCTURED_OUTPUTS) {
-        console.log('Structured Outputsを使用して生成します...');
-        const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
-        const result = await structuredModel.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
-        generatedText = result.generated_text.trim();
-      } else {
-        const result = await model.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
-        generatedText = result.content.toString().trim();
-      }
+      let generatedText = await invokeLLM(currentProvider, messages);
       const endTime = new Date();
       console.log(`\n===== 2pass目 生成終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
 
@@ -557,31 +497,15 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
     try {
       console.log(`1pass目: ${currentProvider.toUpperCase()}を使用して文章を生成します...`);
       const statusesText = JSON.stringify(statuses);
-      const model = createLLMModel(currentProvider);
       const prompt = `\n#前提情報\n今日は${getFormattedDateTime()}です。\n\n${getSystemPrompt()}\n\n#参考投稿（JSON形式）:\n${statusesText}\n`;
 
       console.log(prompt);
 
+      const messages: ModelMessage[] = [{ role: 'user', content: prompt }];
+
       const startTime = new Date();
       console.log(`\n===== 1pass目 生成開始: ${startTime.toISOString()} =====`);
-      if (DEBUG) {
-        const stream = await model.stream([{ role: 'user', content: prompt }]);
-        let streamedText = '';
-        for await (const chunk of stream) {
-          const text = chunk.text ?? '';
-          process.stdout.write(text);
-          streamedText += text;
-        }
-        firstPassText = streamedText.trim();
-      } else if (USE_STRUCTURED_OUTPUTS) {
-        console.log('Structured Outputsを使用して生成します...');
-        const structuredModel = model.withStructuredOutput(GeneratedTextSchema);
-        const result = await structuredModel.invoke([{ role: 'user', content: prompt }]);
-        firstPassText = result.generated_text.trim();
-      } else {
-        const result = await model.invoke([{ role: 'user', content: prompt }]);
-        firstPassText = result.content.toString().trim();
-      }
+      firstPassText = await invokeLLM(currentProvider, messages);
       const endTime = new Date();
       console.log(`\n===== 1pass目 生成終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
 
@@ -618,7 +542,7 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
     console.error(`1pass目: 最大リトライ回数(${MAX_RETRIES}回)に達しました`);
     return null;
   }
-  
+
   // 2pass目の処理（有効な場合）
   let finalText = firstPassText;
   if (TWO_PASS_MODE) {
@@ -627,7 +551,7 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
       finalText = secondPassText;
     }
   }
-  
+
   saveHistory(finalText, accountId);
   finalText = `${finalText} #bot`;
   return finalText;
@@ -686,4 +610,4 @@ export async function runMain(): Promise<void> {
 
 if (require.main === module) {
   runMain();
-} 
+}

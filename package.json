@@ -1,6 +1,6 @@
 {
   "name": "mastodon-ai-bot",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Mastodonアカウントの投稿履歴を取得し、AI（Gemini/Groq/LM Studio/Anthropic/OpenAI）を使って新しい投稿文を生成するツール",
   "main": "index.ts",
   "scripts": {
@@ -18,18 +18,18 @@
     "llm",
     "ai",
     "bot",
-    "langchain"
+    "vercel-ai-sdk"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@langchain/anthropic": "^1.2.3",
-    "@langchain/core": "^1.1.4",
-    "@langchain/google-genai": "^1.0.3",
-    "@langchain/groq": "^1.0.2",
-    "@langchain/openai": "^1.1.3",
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/groq": "^3.0.35",
+    "@ai-sdk/openai": "^3.0.53",
+    "@ai-sdk/openai-compatible": "^2.0.41",
+    "ai": "^6.0.168",
     "dotenv": "^16.4.5",
-    "langchain": "^1.1.5",
     "megalodon": "^10.1.1",
     "node-cron": "^3.0.3",
     "zod": "^4.2.1"
