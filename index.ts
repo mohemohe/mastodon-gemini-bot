@@ -32,6 +32,10 @@ const TWO_PASS_LLM_PROVIDER = process.env.TWO_PASS_LLM_PROVIDER || '';
 // Structured Outputs設定
 const USE_STRUCTURED_OUTPUTS = (process.env.USE_STRUCTURED_OUTPUTS || 'false') === 'true';
 
+// 出力テキストの最大文字数。異常に長い出力はシステムプロンプトインジェクション等の可能性があるため、超過時は再生成する。
+// 未設定または0以下のときは無効。
+const TEXT_LENGTH_LIMIT = Number.parseInt(process.env.TEXT_LENGTH_LIMIT || '0', 10);
+
 // DEBUG設定: 1のときStructured Outputを無視しストリーミング出力する
 const DEBUG = process.env.DEBUG === '1';
 
@@ -384,6 +388,24 @@ function getFormattedDateTime(): string {
   }).replace(/\//g, '/').replace(/,/g, '');
 }
 
+class TextLengthLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TextLengthLimitError';
+  }
+}
+
+function ensureTextWithinLimit(text: string, label: string): void {
+  if (TEXT_LENGTH_LIMIT <= 0) {
+    return;
+  }
+  if (text.length > TEXT_LENGTH_LIMIT) {
+    throw new TextLengthLimitError(
+      `${label}: 生成されたテキストがTEXT_LENGTH_LIMIT(${TEXT_LENGTH_LIMIT})を超えました(${text.length}文字)。プロンプトインジェクションの可能性があるため再生成します。`
+    );
+  }
+}
+
 async function invokeLLM(provider: string, messages: ModelMessage[]): Promise<string> {
   const { model, temperature } = createLLMProvider(provider);
   const commonOptions = temperature !== undefined ? { temperature } : {};
@@ -447,6 +469,7 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
       console.log(`\n===== 2pass目 生成終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
 
       generatedText = generatedText.replace(/[\r\n]+$/, '');
+      ensureTextWithinLimit(generatedText, '2pass目');
       return generatedText;
     } catch (error: unknown) {
       // Gemini特有のRECITATIONエラーとその他のエラーを区別
@@ -510,6 +533,7 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
       console.log(`\n===== 1pass目 生成終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
 
       firstPassText = firstPassText.replace(/[\r\n]+$/, '');
+      ensureTextWithinLimit(firstPassText, '1pass目');
       if (TWO_PASS_MODE) {
         console.log('\n===== 生成された文章(1-pass) =====');
         console.log(firstPassText);
