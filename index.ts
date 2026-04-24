@@ -482,10 +482,10 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
       const model = createLLMModel(currentProvider);
 
       let generatedText: string;
+      const startTime = new Date();
+      console.log(`\n===== 2pass目 生成開始: ${startTime.toISOString()} =====`);
       if (DEBUG) {
         const messages = [{ role: 'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }];
-        const startTime = new Date();
-        console.log(`\n===== 2pass目 ストリーミング開始: ${startTime.toISOString()} =====`);
         const stream = await model.stream(messages);
         let streamedText = '';
         for await (const chunk of stream) {
@@ -493,8 +493,6 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
           process.stdout.write(text);
           streamedText += text;
         }
-        const endTime = new Date();
-        console.log(`\n===== 2pass目 ストリーミング終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
         generatedText = streamedText.trim();
       } else if (USE_STRUCTURED_OUTPUTS) {
         console.log('Structured Outputsを使用して生成します...');
@@ -505,6 +503,8 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
         const result = await model.invoke([{role:'system', content: systemPrompt2 }, { role: 'user', content: firstPassText }]);
         generatedText = result.content.toString().trim();
       }
+      const endTime = new Date();
+      console.log(`\n===== 2pass目 生成終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
 
       generatedText = generatedText.replace(/[\r\n]+$/, '');
       return generatedText;
@@ -562,9 +562,9 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
 
       console.log(prompt);
 
+      const startTime = new Date();
+      console.log(`\n===== 1pass目 生成開始: ${startTime.toISOString()} =====`);
       if (DEBUG) {
-        const startTime = new Date();
-        console.log(`\n===== 1pass目 ストリーミング開始: ${startTime.toISOString()} =====`);
         const stream = await model.stream([{ role: 'user', content: prompt }]);
         let streamedText = '';
         for await (const chunk of stream) {
@@ -572,8 +572,6 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
           process.stdout.write(text);
           streamedText += text;
         }
-        const endTime = new Date();
-        console.log(`\n===== 1pass目 ストリーミング終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
         firstPassText = streamedText.trim();
       } else if (USE_STRUCTURED_OUTPUTS) {
         console.log('Structured Outputsを使用して生成します...');
@@ -584,6 +582,8 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
         const result = await model.invoke([{ role: 'user', content: prompt }]);
         firstPassText = result.content.toString().trim();
       }
+      const endTime = new Date();
+      console.log(`\n===== 1pass目 生成終了: ${endTime.toISOString()} (${endTime.getTime() - startTime.getTime()}ms) =====`);
 
       firstPassText = firstPassText.replace(/[\r\n]+$/, '');
       if (TWO_PASS_MODE) {
