@@ -407,8 +407,11 @@ function ensureTextWithinLimit(text: string, label: string): void {
 }
 
 async function invokeLLM(provider: string, messages: ModelMessage[]): Promise<string> {
-  const { model, temperature } = createLLMProvider(provider);
-  const commonOptions = temperature !== undefined ? { temperature } : {};
+  const { model, temperature, providerOptions } = createLLMProvider(provider);
+  const commonOptions = {
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(providerOptions ? { providerOptions } : {}),
+  };
 
   if (DEBUG) {
     const result = streamText({

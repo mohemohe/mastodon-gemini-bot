@@ -1,14 +1,17 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGateway } from '@ai-sdk/gateway';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import type { LanguageModel } from 'ai';
 
 export type LLMProviderConfig = {
   model: LanguageModel;
   temperature?: number;
+  providerOptions?: ProviderOptions;
 };
 
 export type LLMProviderFactory = () => LLMProviderConfig;
@@ -95,6 +98,34 @@ export const providerRegistry: Record<string, LLMProviderFactory> = {
     return {
       model: bedrock(process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0'),
       temperature: 0.7,
+    };
+  },
+
+  'vercel-gateway': () => {
+    const apiKey = process.env.AI_GATEWAY_API_KEY;
+    if (!apiKey) {
+      throw new Error('Vercel AI Gateway プロバイダーを使用する場合、AI_GATEWAY_API_KEYが必要です。');
+    }
+    const baseURL = process.env.AI_GATEWAY_BASE_URL;
+    const modelId = process.env.AI_GATEWAY_MODEL;
+    if (!modelId) {
+      throw new Error('Vercel AI Gateway プロバイダーを使用する場合、AI_GATEWAY_MODELが必要です。');
+    }
+    const gateway = createGateway({
+      apiKey,
+      ...(baseURL ? { baseURL } : {}),
+    });
+    const onlyRaw = process.env.AI_GATEWAY_PROVIDER_OPTIONS_GATEWAY_ONLY;
+    const only = onlyRaw
+      ? onlyRaw.split(',').map(s => s.trim()).filter(s => s.length > 0)
+      : [];
+    const providerOptions: ProviderOptions | undefined = only.length > 0
+      ? { gateway: { only } }
+      : undefined;
+    return {
+      model: gateway(modelId),
+      temperature: 0.7,
+      ...(providerOptions ? { providerOptions } : {}),
     };
   },
 
