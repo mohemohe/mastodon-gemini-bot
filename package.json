@@ -1,7 +1,7 @@
 {
   "name": "mastodon-ai-bot",
   "version": "1.2.0",
-  "description": "Mastodonアカウントの投稿履歴を取得し、AI（Gemini/Groq/LM Studio/Anthropic/OpenAI）を使って新しい投稿文を生成するツール",
+  "description": "Mastodonアカウントの投稿履歴を取得し、AI（Gemini/Groq/LM Studio/Anthropic/OpenAI/AWS Bedrock）を使って新しい投稿文を生成するツール",
   "main": "index.ts",
   "scripts": {
     "start": "tsx index.ts",
@@ -15,6 +15,7 @@
     "lm-studio",
     "anthropic",
     "openai",
+    "aws-bedrock",
     "llm",
     "ai",
     "bot",
@@ -23,6 +24,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.96",
     "@ai-sdk/anthropic": "^3.0.71",
     "@ai-sdk/google": "^3.0.64",
     "@ai-sdk/groq": "^3.0.35",

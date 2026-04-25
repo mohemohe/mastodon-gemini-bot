@@ -1,3 +1,4 @@
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
@@ -72,6 +73,28 @@ export const providerRegistry: Record<string, LLMProviderFactory> = {
     });
     return {
       model: anthropic(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514'),
+    };
+  },
+
+  bedrock: () => {
+    const region = process.env.AWS_BEDROCK_REGION || process.env.AWS_REGION;
+    if (!region) {
+      throw new Error('AWS Bedrock プロバイダーを使用する場合、AWS_BEDROCK_REGIONまたはAWS_REGIONが必要です。');
+    }
+    const accessKeyId = process.env.AWS_BEDROCK_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.AWS_BEDROCK_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY;
+    const sessionToken = process.env.AWS_BEDROCK_SESSION_TOKEN || process.env.AWS_SESSION_TOKEN;
+    const baseURL = process.env.AWS_BEDROCK_BASE_URL;
+    const bedrock = createAmazonBedrock({
+      region,
+      ...(accessKeyId ? { accessKeyId } : {}),
+      ...(secretAccessKey ? { secretAccessKey } : {}),
+      ...(sessionToken ? { sessionToken } : {}),
+      ...(baseURL ? { baseURL } : {}),
+    });
+    return {
+      model: bedrock(process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-5-sonnet-20241022-v2:0'),
+      temperature: 0.7,
     };
   },
 
