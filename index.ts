@@ -489,12 +489,12 @@ async function generateSecondPassText(firstPassText: string): Promise<string | n
 
       if (retryCount < MAX_RETRIES - 1) {
         retryCount++;
-        console.log(`2pass目: 文章生成中にエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES}):`, error);
+        console.log(`2pass目: 文章生成中にエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES}):`, JSON.stringify(error, null, 2));
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
 
-      console.error('2pass目: 文章生成中にエラーが発生しました:', error);
+      console.error('2pass目: 文章生成中にエラーが発生しました:', JSON.stringify(error, null, 2));
 
       // 最大リトライ回数に達した場合、フォールバックプロバイダーを試す
       if (FALLBACK_LLM_PROVIDER && currentProvider !== FALLBACK_LLM_PROVIDER) {
@@ -546,12 +546,12 @@ async function generateTextWithLLM(statuses: string[], accountId: string): Promi
     } catch (error: unknown) {
       if (retryCount < MAX_RETRIES - 1) {
         retryCount++;
-        console.log(`1pass目: 文章生成中にエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES}):`, error);
+        console.log(`1pass目: 文章生成中にエラーが発生しました。リトライします (${retryCount}/${MAX_RETRIES}):`, JSON.stringify(error, null, 2));
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
 
-      console.error('1pass目: 文章生成中にエラーが発生しました:', error);
+      console.error('1pass目: 文章生成中にエラーが発生しました:', JSON.stringify(error, null, 2));
 
       // 最大リトライ回数に達した場合、フォールバックプロバイダーを試す
       if (FALLBACK_LLM_PROVIDER && currentProvider !== FALLBACK_LLM_PROVIDER) {
