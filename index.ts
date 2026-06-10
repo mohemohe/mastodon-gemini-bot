@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import generator from 'megalodon';
 import type { MegalodonInterface } from 'megalodon';
-import { generateText, streamText, Output, type ModelMessage } from 'ai';
+import { generateText, streamText, Output, NoObjectGeneratedError, type ModelMessage } from 'ai';
 import fs from 'node:fs';
 import path from 'node:path';
 import { GeneratedTextSchema } from './structure';
@@ -406,6 +406,25 @@ function ensureTextWithinLimit(text: string, label: string): void {
   }
 }
 
+function tryRecoverFromNoObjectGeneratedError(error: unknown): string | null {
+  if (!NoObjectGeneratedError.isInstance(error)) {
+    return null;
+  }
+  const response = error.response as unknown as {
+    body?: { content?: Array<{ text?: unknown }> };
+  } | undefined;
+  const contentText = response?.body?.content?.[0]?.text;
+  if (typeof contentText !== 'string' || contentText.length === 0) {
+    return null;
+  }
+  try {
+    const parsed = GeneratedTextSchema.parse(JSON.parse(contentText));
+    return parsed.generated_text.trim();
+  } catch {
+    return null;
+  }
+}
+
 async function invokeLLM(provider: string, messages: ModelMessage[]): Promise<string> {
   const { model, temperature, providerOptions } = createLLMProvider(provider);
   const commonOptions = {
@@ -429,13 +448,23 @@ async function invokeLLM(provider: string, messages: ModelMessage[]): Promise<st
 
   if (USE_STRUCTURED_OUTPUTS) {
     console.log('Structured Outputsを使用して生成します...');
-    const result = await generateText({
-      model,
-      messages,
-      output: Output.object({ schema: GeneratedTextSchema }),
-      ...commonOptions,
-    });
-    return result.output.generated_text.trim();
+    try {
+      const result = await generateText({
+        model,
+        messages,
+        output: Output.object({ schema: GeneratedTextSchema }),
+        ...commonOptions,
+      });
+      return result.output.generated_text.trim();
+    } catch (error: unknown) {
+      // Structured Output非対応モデルの場合、error.response.body.content[0].text に
+      // 生成結果のJSON文字列が含まれていることがあるため、そこから復元を試みる
+      const recoveredText = tryRecoverFromNoObjectGeneratedError(error);
+      if (recoveredText !== null) {
+        return recoveredText;
+      }
+      throw error;
+    }
   }
 
   const result = await generateText({
