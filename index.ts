@@ -114,6 +114,27 @@ function extractPublicStatusTexts(statuses: Status[]): string[] {
     .filter(text => text.trim().length > 0);
 }
 
+export function loadIgnoreKeywords(ignoreKeywordsPath = path.join(__dirname, '.ignore_keywords')): string[] {
+  if (!fs.existsSync(ignoreKeywordsPath)) {
+    return [];
+  }
+
+  return fs.readFileSync(ignoreKeywordsPath, 'utf8')
+    .split(/\r?\n/)
+    .map(keyword => keyword.trim())
+    .filter(keyword => keyword.length > 0);
+}
+
+export function filterStatusesByIgnoreKeywords(statuses: string[], ignoreKeywords: string[]): string[] {
+  if (ignoreKeywords.length === 0) {
+    return statuses;
+  }
+
+  return statuses.filter(status =>
+    !ignoreKeywords.some(ignoreKeyword => status.includes(ignoreKeyword))
+  );
+}
+
 async function resolveAccountId(username: string, sourceClient: MegalodonInterface): Promise<string> {
   try {
     const cleanUsername = username.startsWith('@') ? username.substring(1) : username;
@@ -644,10 +665,21 @@ export async function runMain(): Promise<void> {
       console.log('投稿が見つかりませんでした。プログラムを終了します。');
       return;
     }
+
+    const ignoreKeywords = loadIgnoreKeywords();
+    const filteredStatuses = filterStatusesByIgnoreKeywords(statuses, ignoreKeywords);
+    if (ignoreKeywords.length > 0) {
+      console.log(`.ignore_keywordsの${ignoreKeywords.length}件のキーワードにより${statuses.length - filteredStatuses.length}件の投稿を除外しました`);
+    }
+    if (filteredStatuses.length === 0) {
+      console.log('除外後にLLMへ渡せる投稿がありませんでした。プログラムを終了します。');
+      return;
+    }
+
     const RANDOM_SAMPLE_SIZE = Number.parseInt(process.env.RANDOM_SAMPLE_SIZE || '500', 10);
-    const sampleSize = Math.min(statuses.length, RANDOM_SAMPLE_SIZE);
-    const randomStatuses = getRandomSample(statuses, sampleSize);
-    console.log(`${statuses.length}件の投稿からランダムに${randomStatuses.length}件を抽出しました`);
+    const sampleSize = Math.min(filteredStatuses.length, RANDOM_SAMPLE_SIZE);
+    const randomStatuses = getRandomSample(filteredStatuses, sampleSize);
+    console.log(`${filteredStatuses.length}件の投稿からランダムに${randomStatuses.length}件を抽出しました`);
     const generatedText = await generateTextWithLLM(randomStatuses, accountId);
     if (generatedText) {
       console.log('\n===== 最終結果 =====');

@@ -28,3 +28,4 @@ Thumbs.db
 *.swo 
 .systemprompt
 .systemprompt2
+.ignore_keywords
